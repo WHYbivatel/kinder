@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#08080a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Мои фильмы">
+  <title>Битва фильмов — Мой список фильмов</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="appShell.css">
+  <script src="theme.js"></script>
+</head>
+<body data-page="battle">
+
+  <div id="login-overlay" class="login-overlay">
+    <div class="login-card">
+      <h1>Мой список фильмов</h1>
+      <p id="open-via-server-hint" class="server-hint hidden"></p>
+      <div id="login-box">
+        <h2>Вход</h2>
+        <form id="login-form">
+          <input type="text" id="login-username" placeholder="Логин" required autocomplete="username">
+          <input type="password" id="login-password" placeholder="Пароль" required autocomplete="current-password">
+          <button type="submit">Войти</button>
+        </form>
+        <p id="login-error" class="auth-error"></p>
+        <p class="auth-switch">Нет аккаунта? <button type="button" id="show-register">Зарегистрироваться</button></p>
+      </div>
+      <div id="register-box" class="hidden">
+        <h2>Регистрация</h2>
+        <form id="register-form">
+          <input type="text" id="register-username" placeholder="Логин (мин. 3 символа)" required>
+          <input type="password" id="register-password" placeholder="Пароль (мин. 4 символа)" required>
+          <button type="submit">Создать аккаунт</button>
+        </form>
+        <p id="register-error" class="auth-error"></p>
+        <p class="auth-switch">Уже есть аккаунт? <button type="button" id="show-login">Войти</button></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="app-content" class="hidden">
+    <header class="app-header">
+      <div class="header-inner">
+        <a href="/" class="header-brand header-brand-link">
+          <span class="site-logo" aria-hidden="true">🎬</span>
+          <div class="header-brand-text">
+            <h1>Мои фильмы</h1>
+            <span id="user-greeting" class="user-greeting"></span>
+          </div>
+        </a>
+        <nav class="header-nav" aria-label="Навигация">
+          <a href="/" class="header-nav-link" data-page="home">Список</a>
+          <a href="/battle.html" class="header-nav-link" data-page="battle">Битва фильмов</a>
+        </nav>
+        <div class="header-right">
+          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Переключить тему" aria-label="Переключить тему" aria-pressed="false"><span class="theme-toggle-icon" aria-hidden="true">🌙</span></button>
+          <a href="/account.html" class="header-avatar" id="header-avatar" title="Мой аккаунт">?</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-content page-content--battle">
+      <section id="battle-section" class="battle-home-section content-section battle-page-section">
+        <h2 class="section-heading">Битва фильмов</h2>
+        <p class="battle-home-desc">Выбирайте лучший фильм или сериал из пары — мы соберём ваш личный топ из того, что вы уже посмотрели.</p>
+        <button type="button" id="battle-start-btn" class="battle-start-btn">Начать битву</button>
+        <div id="battle-my-top" class="battle-home-top hidden"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="display.js"></script>
+  <script src="battleLogic.js"></script>
+  <script src="script.js"></script>
+  <script src="battle.js"></script>
+  <script src="headerNav.js"></script>
+  <script src="pwa.js"></script>
+  <script src="auth.js"></script>
+  <script src="appShell.js"></script>
+</body>
+</html>

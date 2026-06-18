@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#08080a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Мои фильмы">
+  <title>Профиль — Мой список фильмов</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="psychTest.css">
+  <link rel="stylesheet" href="visualTest.css">
+  <link rel="stylesheet" href="shortVisualTest.css">
+  <link rel="stylesheet" href="appShell.css">
+  <script src="theme.js"></script>
+</head>
+<body data-page="account">
+
+  <div id="login-overlay" class="login-overlay">
+    <div class="login-card">
+      <h1>Мой список фильмов</h1>
+      <p id="open-via-server-hint" class="server-hint hidden"></p>
+      <div id="login-box">
+        <h2>Вход</h2>
+        <form id="login-form">
+          <input type="text" id="login-username" placeholder="Логин" required autocomplete="username">
+          <input type="password" id="login-password" placeholder="Пароль" required autocomplete="current-password">
+          <button type="submit">Войти</button>
+        </form>
+        <p id="login-error" class="auth-error"></p>
+        <p class="auth-switch">Нет аккаунта? <button type="button" id="show-register">Зарегистрироваться</button></p>
+      </div>
+      <div id="register-box" class="hidden">
+        <h2>Регистрация</h2>
+        <form id="register-form">
+          <input type="text" id="register-username" placeholder="Логин (мин. 3 символа)" required>
+          <input type="password" id="register-password" placeholder="Пароль (мин. 4 символа)" required>
+          <button type="submit">Создать аккаунт</button>
+        </form>
+        <p id="register-error" class="auth-error"></p>
+        <p class="auth-switch">Уже есть аккаунт? <button type="button" id="show-login">Войти</button></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="app-content" class="hidden">
+    <header class="app-header">
+      <div class="header-inner">
+        <a href="/" class="header-brand header-brand-link">
+          <span class="site-logo" aria-hidden="true">🎬</span>
+          <div class="header-brand-text">
+            <h1>Мои фильмы</h1>
+            <span id="user-greeting" class="user-greeting"></span>
+          </div>
+        </a>
+        <nav class="header-nav" aria-label="Навигация">
+          <a href="/" class="header-nav-link" data-page="home">Список</a>
+          <a href="/battle.html" class="header-nav-link" data-page="battle">Битва фильмов</a>
+        </nav>
+        <div class="header-right">
+          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Переключить тему" aria-label="Переключить тему" aria-pressed="false"><span class="theme-toggle-icon" aria-hidden="true">🌙</span></button>
+          <a href="/account.html" class="header-avatar" id="header-avatar" title="Мой аккаунт">?</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-content page-content--account">
+      <section class="account-hero content-section">
+        <h2 class="section-heading">Профиль</h2>
+        <p class="panel-hint">Ваш аккаунт, результаты кино-психологического теста и история прохождений</p>
+      </section>
+
+      <section class="content-section profile-section">
+        <h2 class="section-heading">Основная информация</h2>
+        <div id="profile-info"></div>
+      </section>
+
+      <section class="content-section profile-section">
+        <h2 class="section-heading">Кино-психологический тест</h2>
+        <h3 class="profile-subheading">Последний результат</h3>
+        <div id="profile-psych-latest"></div>
+      </section>
+
+      <section class="content-section profile-section">
+        <h3 class="profile-subheading">Как менялся ваш профиль</h3>
+        <div id="profile-psych-dynamics"></div>
+        <div id="profile-psych-chart"></div>
+      </section>
+
+      <section class="content-section profile-section">
+        <h3 class="profile-subheading">История тестов</h3>
+        <div id="profile-psych-history"></div>
+      </section>
+
+      <section class="content-section profile-section profile-section--visual">
+        <h2 class="section-heading">Визуальный тест восприятия</h2>
+        <h3 class="profile-subheading">Последний результат</h3>
+        <div id="profile-visual-latest"></div>
+      </section>
+
+      <section class="content-section profile-section profile-section--visual">
+        <h3 class="profile-subheading">Как менялся визуальный профиль</h3>
+        <div id="profile-visual-dynamics"></div>
+        <div id="profile-visual-chart"></div>
+      </section>
+
+      <section class="content-section profile-section profile-section--visual">
+        <h3 class="profile-subheading">История визуального теста</h3>
+        <div id="profile-visual-history"></div>
+      </section>
+
+      <section class="content-section profile-section profile-section--short-visual">
+        <h2 class="section-heading">Короткие визуальные тесты</h2>
+        <h3 class="profile-subheading">Последний результат</h3>
+        <div id="profile-short-visual-latest"></div>
+      </section>
+
+      <section class="content-section profile-section profile-section--short-visual">
+        <h3 class="profile-subheading">История прохождений</h3>
+        <div id="profile-short-visual-history"></div>
+      </section>
+
+      <section class="stats-section content-section">
+        <h2 class="section-heading">Статистика просмотров</h2>
+        <div id="stats-grid" class="stats-grid"></div>
+        <div class="stats-details">
+          <div>
+            <h3>Любимые жанры</h3>
+            <div id="stats-genres"></div>
+          </div>
+          <div>
+            <h3>Последние просмотры</h3>
+            <ul id="stats-recent"></ul>
+          </div>
+          <div>
+            <h3>Динамика по месяцам</h3>
+            <ul id="stats-monthly" class="monthly-chart"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="taste-section content-section">
+        <div class="taste-section-header">
+          <h2 class="section-heading">AI-описание вашего вкуса</h2>
+          <button type="button" id="taste-refresh-btn" class="rec-refresh-btn">Обновить анализ</button>
+        </div>
+        <p id="taste-analysis-status" class="panel-hint">На основе просмотренных фильмов, оценок и заметок</p>
+        <div id="taste-analysis-content" class="taste-analysis-content">
+          <div class="rec-loading"><div class="loading-ui" role="status"><span class="loading-ui__spinner" aria-hidden="true"></span><span class="loading-ui__text">Загрузка анализа<span class="loading-ui__ellipsis" aria-hidden="true"></span></span></div></div>
+        </div>
+      </section>
+
+      <section class="content-section profile-logout-section">
+        <button type="button" id="logout-btn" class="logout-btn profile-logout-btn">Выйти из аккаунта</button>
+      </section>
+    </main>
+  </div>
+
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-title"></h3>
+        <button type="button" id="modal-close">✕</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="display.js"></script>
+  <script src="loadingUI.js"></script>
+  <script src="script.js"></script>
+  <script src="features.js"></script>
+  <script src="profile.js"></script>
+  <script src="visualTestScenes.js"></script>
+  <script src="visualTest.js"></script>
+  <script src="shortVisualTest.js"></script>
+  <script src="psychTest.js"></script>
+  <script src="account.js"></script>
+  <script src="headerNav.js"></script>
+  <script src="pwa.js"></script>
+  <script src="auth.js"></script>
+  <script src="appShell.js"></script>
+</body>
+</html>

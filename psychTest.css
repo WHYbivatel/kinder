@@ -1,0 +1,512 @@
+/* Кино-психологический тест */
+
+.psych-home-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1.5rem 1.75rem;
+  border-radius: var(--radius-lg, 16px);
+  background: linear-gradient(135deg, rgba(229, 9, 20, 0.12), rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.psych-home-card--done {
+  background: linear-gradient(135deg, rgba(88, 101, 242, 0.14), rgba(255, 255, 255, 0.03));
+}
+
+.psych-home-text {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.psych-home-date {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.psych-home-profile {
+  margin: 0 0 0.35rem;
+  color: var(--text-primary);
+}
+
+.psych-home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.psych-home-btn,
+.psych-home-actions .btn-primary {
+  white-space: nowrap;
+}
+
+.psych-home-secondary {
+  padding: 0.65rem 1.1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.psych-home-secondary:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+body.psych-open {
+  overflow: hidden;
+}
+
+.psych-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(4, 4, 8, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: psychFadeIn 0.28s ease;
+}
+
+.psych-overlay.hidden {
+  display: none !important;
+}
+
+@keyframes psychFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes psychScaleIn {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes psychSlideIn {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.psych-shell {
+  position: relative;
+  width: min(720px, 100%);
+  max-height: min(90vh, 900px);
+  overflow: auto;
+  padding: 2rem 2rem 1.75rem;
+  border-radius: 20px;
+  background: var(--bg-elevated, #141418);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  animation: psychScaleIn 0.32s ease;
+}
+
+.psych-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.psych-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+}
+
+.psych-step-content {
+  animation: psychSlideIn 0.28s ease;
+}
+
+.psych-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.75rem;
+  color: var(--accent, #e50914);
+  margin: 0 0 0.5rem;
+}
+
+.psych-title,
+.psych-question,
+.psych-profile-title {
+  margin: 0 0 1rem;
+  font-size: clamp(1.35rem, 3vw, 1.75rem);
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.psych-lead,
+.psych-profile-desc {
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin: 0 0 1.5rem;
+}
+
+.psych-progress-wrap {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.psych-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent, #e50914), #ff6b6b);
+  transition: width 0.35s ease;
+}
+
+.psych-progress-label {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  margin: 0 0 1rem;
+}
+
+.psych-options {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.psych-option {
+  text-align: left;
+  padding: 1rem 1.1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+.psych-option:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.psych-option--selected {
+  border-color: rgba(229, 9, 20, 0.65);
+  background: rgba(229, 9, 20, 0.12);
+  box-shadow: 0 0 0 1px rgba(229, 9, 20, 0.25);
+}
+
+.psych-nav,
+.psych-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.psych-actions--result {
+  margin-top: 1.5rem;
+}
+
+.psych-btn-ghost {
+  padding: 0.65rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.psych-btn-ghost:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--text-primary);
+}
+
+.psych-btn-ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.psych-error {
+  color: #ff8a8a;
+  font-size: 0.875rem;
+  margin-top: 0.75rem;
+}
+
+.psych-scales {
+  display: grid;
+  gap: 0.85rem;
+  margin: 1.25rem 0 1.5rem;
+}
+
+.psych-scale-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+  margin-bottom: 0.35rem;
+  color: var(--text-secondary);
+}
+
+.psych-scale-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.psych-scale-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #5865f2, #7289da);
+  transition: width 0.4s ease;
+}
+
+.psych-scale-fill--low { width: 33%; }
+.psych-scale-fill--medium { width: 66%; }
+.psych-scale-fill--high { width: 100%; }
+
+.psych-traits h3 {
+  font-size: 0.95rem;
+  margin: 1rem 0 0.5rem;
+  color: var(--text-primary);
+}
+
+.psych-traits ul {
+  margin: 0 0 0.5rem;
+  padding-left: 1.1rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.psych-traits .psych-avoid {
+  color: #ffb4b4;
+}
+
+.psych-loading {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+}
+
+.psych-recs-list {
+  display: grid;
+  gap: 1rem;
+  margin: 1.25rem 0;
+  max-height: 55vh;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.psych-rec-card {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  animation: psychScaleIn 0.35s ease both;
+  transition: opacity 0.25s, transform 0.25s;
+}
+
+.psych-rec-card--dismissed {
+  opacity: 0.45;
+  transform: scale(0.98);
+}
+
+.psych-rec-poster {
+  width: 88px;
+  aspect-ratio: 2/3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+}
+
+.psych-rec-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.psych-rec-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.psych-rec-meta {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.psych-rec-genres {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin: 0.25rem 0;
+}
+
+.psych-rec-reason,
+.psych-rec-connection {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary);
+}
+
+.psych-rec-connection {
+  color: #a8b4ff;
+  font-size: 0.82rem;
+}
+
+.psych-rec-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  align-items: center;
+}
+
+.psych-rec-actions .rec-add-btn {
+  flex-shrink: 0;
+}
+
+.psych-dislike-wrap {
+  position: relative;
+}
+
+.psych-dislike-btn {
+  padding: 0.4rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.psych-dislike-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  min-width: 190px;
+  padding: 0.35rem;
+  border-radius: 12px;
+  background: var(--bg-surface, #1a1a20);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.psych-dislike-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.65rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.psych-dislike-menu button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.psych-rec-skeleton {
+  height: 110px;
+  border-radius: 16px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+  background-size: 200% 100%;
+  animation: psychShimmer 1.2s infinite;
+}
+
+@keyframes psychShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.psych-recs-error {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 1.5rem 0.5rem;
+}
+
+.psych-toast {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(12px);
+  padding: 0.75rem 1.25rem;
+  border-radius: 999px;
+  background: var(--bg-surface, #1a1a20);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+  z-index: 1300;
+  max-width: min(90vw, 420px);
+  text-align: center;
+}
+
+.psych-toast--visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.psych-toast--success {
+  border-color: rgba(72, 187, 120, 0.45);
+}
+
+.psych-toast--error {
+  border-color: rgba(229, 9, 20, 0.45);
+}
+
+@media (max-width: 640px) {
+  .psych-shell {
+    padding: 1.5rem 1.25rem 1.25rem;
+    border-radius: 16px 16px 0 0;
+    align-self: flex-end;
+    max-height: 92vh;
+  }
+
+  .psych-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .psych-rec-card {
+    grid-template-columns: 72px 1fr;
+  }
+
+  .psych-rec-poster {
+    width: 72px;
+  }
+
+  .psych-home-card {
+    padding: 1.25rem;
+  }
+}
+
+.psych-recs-based-on {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}

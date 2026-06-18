@@ -1,0 +1,191 @@
+/* ===================================================================
+   appShell.css — интерфейс «как в мобильном приложении» для PWA / телефона.
+   Активируется только когда на <body> есть класс .app-mode
+   (его ставит appShell.js в standalone-PWA или на узком/мобильном экране).
+   На обычном ПК-браузере эти стили не применяются — десктоп не меняется.
+   Чтобы откатить: удалить подключение этого файла из *.html и сам файл.
+   =================================================================== */
+
+body.app-mode {
+  --app-tabbar-h: 64px;
+  --app-tabbar-gap: 12px;
+  padding-bottom: calc(
+    var(--app-tabbar-h) + var(--app-tabbar-gap) + 1rem + env(safe-area-inset-bottom)
+  );
+}
+
+/* В app-режиме верхняя «широкая» навигация и старая мобильная панель не нужны */
+body.app-mode .header-nav {
+  display: none !important;
+}
+body.app-mode .mobile-app-nav {
+  display: none !important;
+}
+
+/* Плавающую кнопку «AI-помощник» прячем — теперь это вкладка */
+body.app-mode .chat-toggle-btn--fixed {
+  display: none !important;
+}
+
+/* ── Нижняя панель вкладок ───────────────────────────────────────── */
+.app-tabbar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--app-tabbar-gap) + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: calc(var(--z-header) + 30);
+  display: none;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.15rem;
+  width: min(520px, calc(100vw - 1.25rem));
+  padding: 0.4rem 0.45rem;
+  border: 1px solid var(--border-default);
+  border-radius: 22px;
+  background: rgba(14, 14, 18, 0.92);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+body.app-mode .app-tabbar {
+  display: grid;
+}
+
+.app-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.16rem;
+  min-width: 0;
+  min-height: 50px;
+  padding: 0.25rem 0.1rem;
+  border: 0;
+  border-radius: 15px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+
+.app-tab__icon {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.app-tab__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.app-tab:hover {
+  color: var(--text-secondary);
+}
+
+.app-tab--active {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.app-tab--active .app-tab__icon {
+  filter: drop-shadow(0 0 6px var(--accent-glow));
+}
+
+/* ── Экраны ──────────────────────────────────────────────────────── */
+/* Переключение видимости секций делает appShell.js через inline display.
+   Здесь — только то, что нельзя сделать инлайном. */
+
+/* На широком экране (установленная PWA на десктопе) убираем 2-колоночный
+   layout, чтобы экраны занимали всю ширину. */
+body.app-mode .app-layout {
+  display: block;
+}
+
+body.app-mode .main-content {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* ── Экран AI (чат на всю область) ───────────────────────────────── */
+body.app-mode[data-app-screen="ai"] #chat-panel {
+  display: flex !important;
+  left: 0;
+  right: 0;
+  width: 100%;
+  top: var(--header-height, 56px);
+  bottom: 0;
+  transform: none !important;
+  border-left: 0;
+  z-index: calc(var(--z-header) + 10);
+  padding-bottom: calc(
+    var(--app-tabbar-h) + var(--app-tabbar-gap) + env(safe-area-inset-bottom)
+  );
+}
+
+/* На остальных экранах чат скрыт (даже если кто-то снял .hidden) */
+body.app-mode:not([data-app-screen="ai"]) #chat-panel {
+  display: none !important;
+}
+
+/* Кнопку закрытия чата в app-режиме прячем — выход через вкладки */
+body.app-mode #chat-close {
+  display: none !important;
+}
+
+/* ── Лента премьер: свайп пальцем ────────────────────────────────── */
+/* На десктопе viewport имеет overflow:hidden (листается стрелками).
+   В app-режиме включаем нативную горизонтальную прокрутку касанием. */
+body.app-mode .premiere-ribbon-viewport {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scroll-behavior: smooth;
+  padding: 0 1rem 0.4rem;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+body.app-mode .premiere-ribbon-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+body.app-mode .premiere-ribbon-track {
+  /* убираем transform-переход — двигаем нативным скроллом */
+  transition: none;
+}
+
+body.app-mode .premiere-ribbon-card {
+  scroll-snap-align: start;
+}
+
+/* Стрелки навигации по премьерам на телефоне не нужны — есть свайп */
+@media (pointer: coarse) {
+  body.app-mode .premiere-ribbon-nav {
+    display: none;
+  }
+}
+
+/* ── Свайп-лента: компактно, как в приложении ───────────────────── */
+/* Убираем большой пустой блок под стопкой, чтобы карточка и кнопки
+   «Хочу / Пропустить» помещались на экране без прокрутки. */
+body.app-mode .discover-stack {
+  min-height: 0;
+  margin-bottom: 0.5rem;
+}
+
+/* Кнопки лайк/пропуск всегда поверх и кликабельны */
+body.app-mode .discover-actions {
+  position: relative;
+  z-index: 4;
+  margin-top: 0.5rem;
+}

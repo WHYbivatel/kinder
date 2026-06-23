@@ -201,12 +201,21 @@ function hasLooseWord(text, aliases) {
   return getWordSpans(text).some((item) => aliases.some((alias) => looseWordEquals(item.word, alias)));
 }
 
+// Слова-носители типа («фильм», «сериал», «кино»…) — это существительные,
+// а не глаголы-команды. Их нельзя матчить как интент-глагол, иначе «фильм»
+// по нечёткому сравнению цепляется к «фильтр» (show) и запрос на подборку
+// «посоветуй фильм …» ошибочно превращается в «покажи весь список».
+const MEDIA_INTENT_BLOCK = new Set(
+  [...MEDIA_ALIAS_WORDS.tv, ...MEDIA_ALIAS_WORDS.movie].map(normalizeLooseWord)
+);
+
 function findLooseWord(text, aliases, options = {}) {
   const words = getWordSpans(text);
   const maxIndex = options.maxIndex ?? words.length - 1;
   return words.find((item, index) => (
     index <= maxIndex
     && !POLITE_WORDS.has(item.word)
+    && !MEDIA_INTENT_BLOCK.has(item.word)
     && aliases.some((alias) => looseWordEquals(item.word, alias))
   )) || null;
 }
@@ -929,4 +938,230 @@ export function formatOpenAIError(message) {
 export function isOpenAIQuotaError(message) {
   const lower = String(message || '').toLowerCase();
   return lower.includes('quota') || lower.includes('billing') || lower.includes('insufficient');
+}
+
+/* ===================================================================
+   INTENT-СЛОЙ AI-ЧАТА (экономия OpenAI)
+   -------------------------------------------------------------------
+   Этот блок отвечает за то, ЧТОБЫ НЕ ДЁРГАТЬ OpenAI без необходимости:
+     1) isMovieRelatedPrompt() — отсекает запросы не про кино/сериалы
+        ещё ДО любого обращения к OpenAI (см. server.js /api/chat).
+     2) classifyChatIntent() — определяет тип запроса, чтобы выбрать
+        самый дешёвый способ ответа (локально / TMDb / OpenAI).
+     3) detectRecommendationRequest() — распознаёт «простые» подборки
+        (жанр + количество + фильмы/сериалы), которые делаются через
+        TMDb без OpenAI.
+   Никаких сетевых вызовов здесь нет — только текстовый разбор.
+   =================================================================== */
+
+// Слова-сигналы того, что запрос ОТНОСИТСЯ к кино/сериалам.
+// Если хоть один встретился — считаем тему разрешённой.
+const MOVIE_SIGNAL_PATTERNS = [
+  /фильм|сериал|кино|муви|movie|film|киношк|телесериал/,
+  /мультф|мультик|мультсериал|анимаци|аниме|anime/,
+  /актёр|актер|актрис|режисс|сценар|кинокартин|кинолент/,
+  /жанр|боевик|комеди|драм|мелодрам|романт|ужас|ужастик|хоррор|триллер/,
+  /детектив|криминал|фантастик|фэнтези|фентези|вестерн|документал|экшен|экшн|приключ|мюзикл/,
+  /премьер|кинопоиск|kinopoisk|imdb|tmdb|постер|трейлер|сюжет|спойлер/,
+  /\bсери[яи]\b|сезон|эпизод|франшиз|экраниз/,
+  /посмотр|просмотр|гляну|глянуть|заценить|пересмотр/,
+  /рекоменд|посоветуй|посоветова|порекоменд|подбор|подбери|подскаж|подобрать/,
+  /\bвкус\b|watchlist|вишлист|оцен(?:к|и|ил|ить)|рейтинг/,
+  /что\s+посмотреть|что\s+глянуть|нужен\s+фильм|нужен\s+сериал|хочется\s+посмотреть/,
+  // глаголы управления списком (добавь/удали/отметь/покажи …)
+  /добав|закин|занеси|внеси|удали|убери|выкинь|вычеркни|отметь|пометь|поставь\s+\d|перенеси|перемести/,
+  /покажи|выведи|список\s+фильм|список\s+сериал|сколько\s+фильм|сколько\s+сериал/
+];
+
+// Слова-сигналы того, что запрос НЕ про кино (математика, код, спорт…).
+// При отсутствии киносигналов такие запросы НЕ уходят в OpenAI.
+const OFF_TOPIC_PATTERNS = [
+  /сочинени|эссе|реферат|\bдоклад\b|курсов/,
+  /математик|уравнени|интеграл|производн|\bфизик|\bхими[яю]|геометри|алгебр|задач[уа]\s+по/,
+  /тренировк|упражнени|фитнес|качал|пресс|диет[уа]|похуде/,
+  /инфляц|экономик|биткоин|крипт|\bакци[ийяю]\b|инвест|ипотек|кредит|налог|\bзарплат/,
+  /заработ|деньг|подработк|бизнес[\s-]?план/,
+  /\bкод\b|кодинг|программир|\bpython\b|\bjavascript\b|\bфункци[яю]\b\s|скрипт\s+на/,
+  /перевед|переведи|перевод\s+текст|грамматик|спряжени/,
+  /погод[аеуы]|гороскоп|анекдот|\bстих|поэм|\bрецепт|приготов|сварить|пожарить/,
+  /резюме|ваканси|медицин|симптом|лекарств|диагноз/
+];
+
+function normalizeIntentText(message) {
+  return String(message || '').toLowerCase().replace(/ё/g, 'е').trim();
+}
+
+/**
+ * isMovieRelatedPrompt — главный фильтр релевантности.
+ * true  → можно обрабатывать (локально / TMDb / OpenAI);
+ * false → запрос не про кино, OpenAI вызывать НЕЛЬЗЯ.
+ *
+ * Логика строгая: пропускаем только при явном киносигнале. Это и есть
+ * место, «где фильтруются нерелевантные запросы».
+ */
+export function isMovieRelatedPrompt(message) {
+  const text = normalizeIntentText(message);
+  if (!text) return false;
+
+  // Кавычки с названием + любой намёк на действие — считаем про кино.
+  const hasQuotedTitle = /[«"'][^«»"']{2,}[»"']/.test(text);
+  const hasMovieSignal = MOVIE_SIGNAL_PATTERNS.some((re) => re.test(text));
+  if (hasMovieSignal) return true;
+
+  const hasOffTopic = OFF_TOPIC_PATTERNS.some((re) => re.test(text));
+  if (hasOffTopic) return false;
+
+  // Кавычки-название без явного оффтопа трактуем как кинозапрос
+  // (например «расскажи про "Дюна"»).
+  if (hasQuotedTitle) return true;
+
+  // По умолчанию — строго: нет киносигнала → не наша тема.
+  return false;
+}
+
+// Стандартный ответ для нерелевантных запросов (без обращения к OpenAI).
+export const OFF_TOPIC_REPLY =
+  'Я могу помогать только с фильмами, сериалами, подборками, рекомендациями и вашим списком просмотра.';
+
+/* ── Словарь жанров: русское слово → id жанров TMDB (movie/tv) ───────
+   id фиксированы у TMDB, поэтому используем статическую таблицу — это
+   позволяет распознавать жанр локально, без запроса к TMDb. */
+const GENRE_DICTIONARY = [
+  { re: /боевик|экшен|экшн/, movie: 28, tv: 10759, name: 'боевик' },
+  { re: /приключ/, movie: 12, tv: 10759, name: 'приключения' },
+  { re: /комеди/, movie: 35, tv: 35, name: 'комедия' },
+  { re: /мелодрам|романт|романс/, movie: 10749, tv: 18, name: 'мелодрама' },
+  { re: /(?<!мело)драм/, movie: 18, tv: 18, name: 'драма' },
+  { re: /ужас|ужастик|хоррор/, movie: 27, tv: 9648, name: 'ужасы' },
+  { re: /триллер/, movie: 53, tv: 9648, name: 'триллер' },
+  { re: /детектив/, movie: 9648, tv: 9648, name: 'детектив' },
+  { re: /криминал|мафи|гангстер/, movie: 80, tv: 80, name: 'криминал' },
+  { re: /фантастик|sci-?fi|научн\w*\s+фантаст/, movie: 878, tv: 10765, name: 'фантастика' },
+  { re: /фэнтези|фентези|фэнтэзи/, movie: 14, tv: 10765, name: 'фэнтези' },
+  { re: /истори(?:ческ|я|и|й)/, movie: 36, tv: 18, name: 'история' },
+  { re: /военн|\bwar\b/, movie: 10752, tv: 10768, name: 'военный' },
+  { re: /семейн/, movie: 10751, tv: 10751, name: 'семейный' },
+  { re: /мультф|мультик|мультсериал|анимаци/, movie: 16, tv: 16, name: 'мультфильм' },
+  { re: /\bаниме\b|\banime\b/, movie: 16, tv: 16, name: 'аниме', originalLanguage: 'ja' },
+  { re: /документал/, movie: 99, tv: 99, name: 'документальный' },
+  { re: /вестерн/, movie: 37, tv: 37, name: 'вестерн' },
+  { re: /мюзикл|музыкальн/, movie: 10402, tv: 10402, name: 'музыка' }
+];
+
+// Глаголы/обороты запроса на ПОДБОРКУ (рекомендацию новых фильмов).
+const RECOMMEND_INTENT = /посоветуй|посоветова|порекоменд|рекоменд|подбери|подобрать|подскаж|\bдай\b|\bдайте\b|скинь|накидай|\bхочу\b|\bхочется\b|нужен\s+(?:фильм|сериал)|нужны?\s+(?:фильм|сериал)|что\s+(?:посмотреть|глянуть)|на\s+вечер|во\s+что\s+поиграть/i;
+
+// Маркеры СЛОЖНОГО запроса: тут нужен OpenAI (нюансы настроения/сравнения).
+const COMPLEX_MARKERS = /как\s+[«"']?\w.*\bно\b|похож\w*.*\bно\b|в\s+духе|напоминает|чтобы\s+было|чтобы\s+(?:не\s+)?\w+|\bно\s+не\b|не\s+банальн|не\s+слишком|более\s+\w|менее\s+\w|поглубже|пофилософск|философск.*мрачн|мрачн.*философск|после\s+[«"']?[А-ЯA-ZЁ]|по\s+мо(?:ему|ем)\s+вкус|на\s+мой\s+вкус|сравни\s+мой\s+вкус|что\s+посмотреть\s+после/i;
+
+// Вопрос про конкретный фильм/сериал (объяснение, факты, сравнение).
+const MOVIE_QUESTION_MARKERS = /объясни|поясни|что\s+(?:значит|означает)|в\s+чём\s+смысл|концовк|кто\s+(?:играет|играл|снял|режисс|автор)|о\s+чём|про\s+что\s+(?:фильм|сериал|кино)|чем\s+отлич|\bразниц|сравни\s+(?:фильм|сериал|их)/i;
+
+// Запрос на анализ вкуса пользователя.
+const TASTE_ANALYSIS_MARKERS = /(?:анализ|проанализир|разбер|оцени)\w*\s+(?:мой\s+)?вкус|мой\s+вкус|вкус\w*\s+(?:измен|раньш|со\s+времен)|сравни\s+мой\s+вкус/i;
+
+function detectCountForRecommendation(text) {
+  if (/\bнесколько\b/.test(text)) return 5;
+  if (/\bпарочк/.test(text)) return 3;
+  if (/\bпару\b/.test(text)) return 2;
+  const m = text.match(/(\d{1,2})\s*(?:фильм|сериал|комеди|боевик|драм|ужас|триллер|детектив|мультф|аниме|штук|шт\b|вариант)/i)
+    || text.match(/(?:посоветуй|подбери|дай|дайте|скинь|накидай|хочу|нужно)\s+(\d{1,2})/i)
+    || text.match(/\b(\d{1,2})\b/);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (n >= 1 && n <= 30) return n;
+  }
+  return null;
+}
+
+function detectGenresForRecommendation(text) {
+  const matched = [];
+  for (const g of GENRE_DICTIONARY) {
+    if (g.re.test(text)) matched.push(g);
+  }
+  return matched;
+}
+
+function detectThemeForRecommendation(text) {
+  // «дай сериалы про маньяков» → тема «маньяков»
+  const m = text.match(/про\s+([a-zа-я0-9ё][a-zа-я0-9ё\s\-]{1,30}?)(?:$|[,.!?]|\s+на\s+вечер|\s+чтобы)/i)
+    || text.match(/\bо\s+([a-zа-яё]{4,}(?:ах|ов|ях|ями)?)\b/i);
+  if (!m) return null;
+  let theme = m[1].trim();
+  // отбрасываем медиаслова, если попали в тему
+  theme = theme.replace(/\b(?:фильм\w*|сериал\w*|кино|мультфильм\w*)\b/gi, '').trim();
+  if (theme.length < 3) return null;
+  return theme.split(/\s+/).slice(0, 3).join(' ');
+}
+
+/**
+ * detectRecommendationRequest — распознаёт запрос на подборку.
+ * Возвращает null, если это не подборка. Иначе:
+ *   { count, mediaType, genreIds, genreNames, theme, originalLanguage,
+ *     isSimple, isComplex }
+ * isSimple=true → можно сделать через TMDb БЕЗ OpenAI.
+ * isComplex=true → нужен OpenAI (нюансы вкуса/настроения/сравнения).
+ */
+export function detectRecommendationRequest(message) {
+  const text = normalizeIntentText(message);
+  if (!text) return null;
+
+  const wantsRecommendation = RECOMMEND_INTENT.test(text);
+  const isComplex = COMPLEX_MARKERS.test(text);
+
+  const genres = detectGenresForRecommendation(text);
+  const theme = detectThemeForRecommendation(text);
+  const mediaType = detectMediaTypeFromText(text) || 'movie';
+  const count = detectCountForRecommendation(text) || 10;
+
+  // Не подборка вовсе: нет ни намёка на рекомендацию, ни сложных маркеров
+  if (!wantsRecommendation && !isComplex) return null;
+
+  const genreIds = genres
+    .map((g) => (mediaType === 'tv' ? g.tv : g.movie))
+    .filter(Boolean);
+  const originalLanguage = genres.find((g) => g.originalLanguage)?.originalLanguage || null;
+
+  // Простая подборка: явный жанр или тема, без «сложных» нюансов.
+  const isSimple = !isComplex && wantsRecommendation && (genreIds.length > 0 || Boolean(theme));
+
+  return {
+    count: Math.max(1, Math.min(20, count)),
+    mediaType,
+    genreIds: [...new Set(genreIds)],
+    genreNames: genres.map((g) => g.name),
+    theme: theme || null,
+    originalLanguage,
+    isSimple,
+    isComplex: isComplex && wantsRecommendation ? true : isComplex
+  };
+}
+
+/**
+ * classifyChatIntent — разбивает запрос на типы (см. ТЗ):
+ *   off_topic | list_command | simple_recommendation |
+ *   complex_recommendation | movie_question | taste_analysis |
+ *   unknown_movie_related
+ *
+ * list_command определяется наличием parseLocalChat-результата на стороне
+ * server.js (поэтому здесь возвращается через hasLocalCommand). Это
+ * центральная точка intent detection для выбора дешёвого пути ответа.
+ */
+export function classifyChatIntent(message, { hasLocalCommand = false } = {}) {
+  if (!isMovieRelatedPrompt(message)) return 'off_topic';
+  if (hasLocalCommand) return 'list_command';
+
+  const text = normalizeIntentText(message);
+  if (TASTE_ANALYSIS_MARKERS.test(text)) return 'taste_analysis';
+
+  const rec = detectRecommendationRequest(message);
+  if (rec?.isSimple) return 'simple_recommendation';
+  if (rec?.isComplex) return 'complex_recommendation';
+
+  if (MOVIE_QUESTION_MARKERS.test(text)) return 'movie_question';
+
+  // Подборка без явного жанра/нюансов, но про кино → отдаём OpenAI.
+  if (rec) return 'complex_recommendation';
+
+  return 'unknown_movie_related';
 }

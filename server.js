@@ -117,7 +117,7 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 35210;
 
 const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
@@ -4365,7 +4365,7 @@ function getLanAddresses() {
   return addresses;
 }
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, process.env.HOST || '127.0.0.1', () => {
   console.log(`Сервер запущен: http://localhost:${PORT}`);
   const lan = getLanAddresses();
   if (lan.length) {

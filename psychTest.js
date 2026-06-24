@@ -1,4 +1,5 @@
 (function initPsychTest() {
+  const PSYCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2A2.5 2.5 0 0 0 7 4.5 2.5 2.5 0 0 0 4.6 7 2.5 2.5 0 0 0 4 11.5 2.5 2.5 0 0 0 5 16 2.5 2.5 0 0 0 7 19a2.5 2.5 0 0 0 2.5 2.5A2.5 2.5 0 0 0 12 19V4.5A2.5 2.5 0 0 0 9.5 2z"/><path d="M14.5 2A2.5 2.5 0 0 1 17 4.5 2.5 2.5 0 0 1 19.4 7 2.5 2.5 0 0 1 20 11.5 2.5 2.5 0 0 1 19 16a2.5 2.5 0 0 1-2 3 2.5 2.5 0 0 1-2.5 2.5A2.5 2.5 0 0 1 12 19V4.5A2.5 2.5 0 0 1 14.5 2z"/></svg>';
   const SCALE_LABELS = {
     depth: 'Глубина',
     emotionality: 'Эмоциональность',
@@ -168,17 +169,19 @@
   function renderHomeBlock() {
     const block = document.getElementById('psych-test-section');
     if (!block) return;
+    const T = (k, f, v) => (window.t ? window.t(k, v) : f);
 
     const hasResult = Boolean(state.psychTest?.profileTitle);
     if (!hasResult) {
       block.innerHTML = `
         <div class="psych-home-card">
+          <div class="test-icon">${PSYCH_ICON}</div>
           <div class="psych-home-text">
-            <h2 class="section-heading">Кино-психологический тест</h2>
-            <p class="panel-hint">Ответьте на 12 вопросов, а AI подберёт фильмы и сериалы под ваше состояние, настроение и стиль восприятия.</p>
+            <h2 class="section-heading">${escapeHtml(T('test.psychTitle', 'Кино-психологический тест'))}</h2>
+            <p class="panel-hint">${escapeHtml(T('test.psychDesc', 'Ответьте на 12 вопросов, а AI подберёт фильмы и сериалы под ваше состояние, настроение и стиль восприятия.'))}</p>
           </div>
           <div class="psych-home-actions">
-            <button type="button" class="btn-primary psych-home-btn" id="psych-start-btn">Пройти тест</button>
+            <button type="button" class="btn-primary psych-home-btn" id="psych-start-btn">${escapeHtml(T('test.psychStart', 'Пройти тест'))}</button>
           </div>
         </div>
       `;
@@ -186,15 +189,16 @@
       const date = formatDate(state.psychTest.completedAt);
       block.innerHTML = `
         <div class="psych-home-card psych-home-card--done">
+          <div class="test-icon">${PSYCH_ICON}</div>
           <div class="psych-home-text">
-            <h2 class="section-heading">Кино-психологический тест</h2>
-            <p class="psych-home-date">Последний тест: ${escapeHtml(date)}</p>
-            <p class="psych-home-profile"><strong>Ваш профиль: ${escapeHtml(state.psychTest.profileTitle)}</strong></p>
+            <h2 class="section-heading">${escapeHtml(T('test.psychTitle', 'Кино-психологический тест'))}</h2>
+            <p class="psych-home-date">${escapeHtml(T('test.lastTest', `Последний тест: ${date}`, { date }))}</p>
+            <p class="psych-home-profile"><strong>${escapeHtml(T('test.yourProfile', `Ваш профиль: ${state.psychTest.profileTitle}`, { title: state.psychTest.profileTitle }))}</strong></p>
             <p class="panel-hint">${escapeHtml(state.psychTest.profileShortDescription || state.psychTest.profileDescription || '')}</p>
           </div>
           <div class="psych-home-actions">
-            <button type="button" class="btn-primary" id="psych-recs-home-btn">Посмотреть рекомендации</button>
-            <button type="button" class="psych-home-secondary" id="psych-retake-home-btn">Пройти заново</button>
+            <button type="button" class="btn-primary" id="psych-recs-home-btn">${escapeHtml(T('test.viewRecs', 'Посмотреть рекомендации'))}</button>
+            <button type="button" class="psych-home-secondary" id="psych-retake-home-btn">${escapeHtml(T('test.retake', 'Пройти заново'))}</button>
           </div>
         </div>
       `;
@@ -322,10 +326,18 @@
       const r = state.result || state.psychTest;
       if (!r) return;
       const scales = r.scales || {};
+      const guestNotice = state.guestResult
+        ? `<p class="psych-guest-notice">⚠ Результат не сохранится. <button type="button" class="psych-inline-login" id="psych-login-link">Войдите</button>, чтобы хранить историю профиля и получать персональные рекомендации.</p>`
+        : '';
+      const saveBtn = state.guestResult
+        ? `<button type="button" class="psych-btn-ghost" id="psych-login-save-btn">Войти, чтобы сохранить</button>`
+        : `<button type="button" class="psych-btn-ghost" id="psych-save-btn"${state.saving ? ' disabled' : ''}>${state.saving ? 'Сохранено ✓' : 'Сохранить результат'}</button>`;
+
       container.innerHTML = `
         <p class="psych-eyebrow">Ваш кино-психологический профиль</p>
         <h2 id="psych-step-title" class="psych-profile-title">${escapeHtml(r.profileTitle)}</h2>
         <p class="psych-profile-desc">${escapeHtml(r.profileDescription || '')}</p>
+        ${guestNotice}
         <div class="psych-scales">
           ${renderScaleBarsHtml(scales)}
         </div>
@@ -337,7 +349,7 @@
         </div>
         <div class="psych-actions psych-actions--result">
           <button type="button" class="btn-primary" id="psych-get-recs-btn">Получить рекомендации</button>
-          <button type="button" class="psych-btn-ghost" id="psych-save-btn"${state.saving ? ' disabled' : ''}>${state.saving ? 'Сохранено ✓' : 'Сохранить результат'}</button>
+          ${saveBtn}
           <button type="button" class="psych-btn-ghost" id="psych-retake-btn">Пройти заново</button>
           <button type="button" class="psych-btn-ghost" id="psych-close-result-btn">Закрыть</button>
         </div>
@@ -349,6 +361,9 @@
         loadRecommendations();
       });
       container.querySelector('#psych-save-btn')?.addEventListener('click', () => toast('Результат уже сохранён', 'success'));
+      const loginFromResult = () => (window.requireLogin ? window.requireLogin() : (window.location.href = '/'));
+      container.querySelector('#psych-login-link')?.addEventListener('click', loginFromResult);
+      container.querySelector('#psych-login-save-btn')?.addEventListener('click', loginFromResult);
       container.querySelector('#psych-retake-btn')?.addEventListener('click', startTest);
       container.querySelector('#psych-close-result-btn')?.addEventListener('click', () => {
         closeOverlay(true);
@@ -411,11 +426,18 @@
     }
   }
 
+  function isGuest() {
+    return typeof window.isLoggedIn === 'function' ? !window.isLoggedIn() : false;
+  }
+
   async function submitTest() {
     const answers = state.questions.map((q) => ({
       questionId: q.id,
       answerId: state.answers[q.id]
     }));
+    // Сохраняем ответы: для гостей они нужны, чтобы получить рекомендации
+    // на лету (результат теста не сохраняется на сервере).
+    state.lastAnswers = answers;
 
     const container = ensureOverlay().querySelector('#psych-step-content');
     if (container) {
@@ -439,13 +461,21 @@
         traits: data.psychTest.traits || data.profile
       };
       state.dirty = false;
-      state.saving = true;
+      state.guestResult = data.guest === true || data.saved === false;
+      // Гость: сохраняем ответы локально, чтобы перенести результат при входе.
+      if (state.guestResult) window.GuestStore?.saveTest?.('psych', answers);
+      state.saving = !state.guestResult; // «Сохранено» только если реально сохранили
       state.selectedResultId = data.psychTest?.id || null;
-      state.step = state.isRetake ? 'saved-notice' : 'result';
+      // Гость всегда видит результат (без экрана «сохранено»).
+      state.step = (state.isRetake && !state.guestResult) ? 'saved-notice' : 'result';
       renderStep();
       renderHomeBlock();
       window.refreshProfilePage?.();
-      toast(state.isRetake ? 'Новый результат сохранён' : 'Профиль сохранён', 'success');
+      if (state.guestResult) {
+        toast('Результат не сохранён — войдите, чтобы хранить историю', 'info');
+      } else {
+        toast(state.isRetake ? 'Новый результат сохранён' : 'Профиль сохранён', 'success');
+      }
     } catch (err) {
       toast(err.message || 'Ошибка сохранения', 'error');
       state.step = 'question';
@@ -551,6 +581,11 @@
       const mediaType = getActiveMediaType();
       const body = { mediaType };
       if (state.selectedResultId) body.resultId = state.selectedResultId;
+      // Гость: результат не сохранён на сервере — передаём ответы, чтобы
+      // профиль пересчитался на лету и рекомендации сработали.
+      if (isGuest() && Array.isArray(state.lastAnswers) && state.lastAnswers.length) {
+        body.answers = state.lastAnswers;
+      }
 
       const res = await fetch('/api/psych-test/recommendations', {
         method: 'POST',
@@ -603,6 +638,8 @@
   document.addEventListener('click', () => {
     document.querySelectorAll('.psych-dislike-menu').forEach((m) => m.classList.add('hidden'));
   });
+
+  document.addEventListener('i18n:change', renderHomeBlock);
 
   function openRecommendationsForResult(resultId) {
     state.selectedResultId = resultId || null;

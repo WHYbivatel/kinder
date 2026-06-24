@@ -20,6 +20,28 @@
     return D?.escapeHtml(text) || String(text);
   }
 
+  // Инлайн SVG-иконки (стиль svgrepo / Lucide, stroke-based)
+  const ICONS = {
+    swords: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/><line x1="19" y1="21" x2="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" y1="14" x2="9" y2="18"/><line x1="7" y1="17" x2="4" y2="20"/><line x1="3" y1="19" x2="5" y2="21"/></svg>',
+    bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+    trophy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>',
+    tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>',
+    film: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>',
+    tv: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>',
+    crown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/></svg>',
+    medal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.21 15 2.66 7.14a2 2 0 0 1 .13-2.2L4.4 2.8A2 2 0 0 1 6 2h12a2 2 0 0 1 1.6.8l1.6 2.14a2 2 0 0 1 .14 2.2L16.79 15"/><path d="M11 12 5.12 2.2"/><path d="m13 12 5.88-9.8"/><path d="M8 7h8"/><circle cx="12" cy="17" r="5"/><path d="M12 18v-2h-.5"/></svg>',
+    play: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg>',
+    star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+    skip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>',
+    chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>'
+  };
+
+  function icon(name, cls = '') {
+    return `<span class="battle-ico${cls ? ` ${cls}` : ''}" aria-hidden="true">${ICONS[name] || ''}</span>`;
+  }
+
   function posterSrc(movie) {
     const url = D?.posterUrl(movie.meta?.poster, 'w500');
     return url || '';
@@ -37,12 +59,13 @@
     const parts = [];
     if (movie.meta?.imdb?.rating) parts.push(`IMDb ${movie.meta.imdb.rating}`);
     if (movie.meta?.kinopoisk?.rating) parts.push(`КП ${movie.meta.kinopoisk.rating}`);
-    return parts.length ? `<span class="battle-card-ratings">${esc(parts.join(' · '))}</span>` : '';
+    return parts.length ? `<span class="battle-card-ratings">${icon('star')}${esc(parts.join(' · '))}</span>` : '';
   }
 
   function mediaBadge(movie) {
-    const label = movie.mediaType === 'tv' ? 'Сериал' : 'Фильм';
-    return `<span class="battle-media-badge">${label}</span>`;
+    const isTv = movie.mediaType === 'tv';
+    const label = isTv ? 'Сериал' : 'Фильм';
+    return `<span class="battle-media-badge">${icon(isTv ? 'tv' : 'film')}${label}</span>`;
   }
 
   function overviewSnippet(movie) {
@@ -68,11 +91,10 @@
         <div class="battle-card-poster-wrap">${posterHtml}</div>
         <div class="battle-card-body">
           <h3 class="battle-card-title">${esc(movie.title)}</h3>
-          <p class="battle-card-meta">${esc(movie.meta?.year || '—')} · ${esc(formatGenres(movie))}</p>
+          <p class="battle-card-meta">${esc(movie.meta?.year || '—')}</p>
           <p class="battle-card-rating">Ваша оценка: <strong>${esc(formatUserRating(movie))}</strong></p>
           ${externalRatingsHtml(movie)}
-          ${overviewSnippet(movie)}
-          ${selectable ? '<span class="battle-card-pick">Выбрать</span>' : ''}
+          ${selectable ? `<span class="battle-card-pick">${icon('check')}Выбрать</span>` : ''}
         </div>
       </button>
     `;
@@ -239,7 +261,8 @@
       const min = isTv ? L.MIN_SERIES : L.MIN_QUICK;
       const featured = !isTv ? ' battle-mode-card--featured' : '';
       return `
-        <button type="button" class="battle-mode-card${featured}" data-mode="quick" data-media="${mediaType}">
+        <button type="button" class="battle-mode-card battle-mode-card--quick${featured}" data-mode="quick" data-media="${mediaType}">
+          <span class="battle-mode-icon">${icon('bolt')}</span>
           <span class="battle-mode-name">Быстрая битва</span>
           <span class="battle-mode-desc">${isTv ? '8 сериалов, 7 выборов, быстрый топ-3.' : '8 фильмов, 7 выборов, быстрый топ-3.'}</span>
           ${watched < min ? `<span class="battle-mode-hint">Нужно ${min} ${typeLabel} (сейчас ${watched})</span>` : ''}
@@ -250,7 +273,8 @@
     if (mode === 'full') {
       const min = isTv ? L.MIN_SERIES : L.MIN_FULL;
       return `
-        <button type="button" class="battle-mode-card" data-mode="full" data-media="${mediaType}">
+        <button type="button" class="battle-mode-card battle-mode-card--full" data-mode="full" data-media="${mediaType}">
+          <span class="battle-mode-icon">${icon('trophy')}</span>
           <span class="battle-mode-name">Полная битва</span>
           <span class="battle-mode-desc">Более точный рейтинг по всем просмотренным ${typeLabel}.</span>
           ${watched < min ? `<span class="battle-mode-hint">Нужно ${min} ${typeLabel}</span>` : ''}
@@ -259,7 +283,8 @@
     }
 
     return `
-      <button type="button" class="battle-mode-card" data-mode="genre" data-media="${mediaType}">
+      <button type="button" class="battle-mode-card battle-mode-card--genre" data-mode="genre" data-media="${mediaType}">
+        <span class="battle-mode-icon">${icon('tag')}</span>
         <span class="battle-mode-name">Битва по жанру</span>
         <span class="battle-mode-desc">${isTv ? 'Лучший сериал в конкретном жанре.' : 'Лучший фильм в конкретном жанре.'}</span>
       </button>
@@ -272,12 +297,12 @@
 
     panel().innerHTML = `
       <header class="battle-header">
-        <h2 class="battle-header-title">Выберите режим битвы</h2>
+        <h2 class="battle-header-title">${icon('swords')}Выберите режим битвы</h2>
         <button type="button" class="battle-close-btn" data-action="close" aria-label="Закрыть">✕</button>
       </header>
       <div class="battle-mode-sections battle-fade-in">
         <section class="battle-mode-section">
-          <h3 class="battle-mode-section-title">Битва фильмов</h3>
+          <h3 class="battle-mode-section-title">${icon('film')}Битва фильмов <span class="battle-mode-section-count">${movieCount}</span></h3>
           <p class="battle-mode-section-meta">${movieCount} в «Посмотрел»</p>
           <div class="battle-mode-grid">
             ${renderModeCard('quick', 'movie')}
@@ -286,7 +311,7 @@
           </div>
         </section>
         <section class="battle-mode-section">
-          <h3 class="battle-mode-section-title">Битва сериалов</h3>
+          <h3 class="battle-mode-section-title">${icon('tv')}Битва сериалов <span class="battle-mode-section-count">${seriesCount}</span></h3>
           <p class="battle-mode-section-meta">${seriesCount} в «Посмотрел»</p>
           <div class="battle-mode-grid">
             ${renderModeCard('quick', 'tv')}
@@ -310,7 +335,7 @@
 
     panel().innerHTML = `
       <header class="battle-header">
-        <h2 class="battle-header-title">${esc(sectionTitle)}</h2>
+        <h2 class="battle-header-title">${icon(mediaType === 'tv' ? 'tv' : 'film')}${esc(sectionTitle)}</h2>
         <button type="button" class="battle-close-btn" data-action="close" aria-label="Закрыть">✕</button>
       </header>
       <div class="battle-genre-list battle-fade-in">
@@ -320,14 +345,14 @@
           return `
             <button type="button" class="battle-genre-item${disabled ? ' battle-genre-item--disabled' : ''}"
               data-genre="${esc(g.name)}" data-media="${mediaType}" ${disabled ? 'disabled' : ''}>
-              <span>${esc(display)}</span>
+              <span class="battle-genre-name">${icon('tag')}${esc(display)}</span>
               <span class="battle-genre-count">${g.count} ${typeLabel}</span>
             </button>
           `;
         }).join('') : `<p class="battle-empty">${esc(emptyText)}</p>`}
       </div>
       <div class="battle-footer-actions">
-        <button type="button" class="battle-btn battle-btn--ghost" data-action="modes">Назад</button>
+        <button type="button" class="battle-btn battle-btn--ghost" data-action="modes">${icon('chevronLeft')}Назад</button>
       </div>
     `;
     bindPanelActions();
@@ -381,7 +406,7 @@
     panel().innerHTML = `
       <header class="battle-header">
         <div class="battle-header-left">
-          <h2 class="battle-header-title">${esc(modeHeaderLabel())}</h2>
+          <h2 class="battle-header-title">${icon('swords')}${esc(modeHeaderLabel())}</h2>
           <span class="battle-progress-label">Раунд ${progress.current} / ${progress.total}</span>
         </div>
         <button type="button" class="battle-close-btn" data-action="close" aria-label="Закрыть">✕</button>
@@ -390,11 +415,11 @@
       <p class="battle-prompt-sub">Нажмите на ${pickLabel}, который нравится вам больше.</p>
       <div class="battle-arena battle-pair-enter" id="battle-arena">
         ${buildBattleCard(pair.left, 'left')}
-        <div class="battle-vs" aria-hidden="true">VS</div>
+        <div class="battle-vs" aria-hidden="true">${icon('swords', 'battle-vs-icon')}<span class="battle-vs-text">VS</span></div>
         ${buildBattleCard(pair.right, 'right')}
       </div>
       <footer class="battle-footer">
-        <button type="button" class="battle-btn battle-btn--ghost battle-skip-btn" data-action="skip">Пропустить пару</button>
+        <button type="button" class="battle-btn battle-btn--ghost battle-skip-btn" data-action="skip">${icon('skip')}Пропустить пару</button>
         <div class="battle-progress-bar-wrap">
           <div class="battle-progress-bar" style="width:${pct}%"></div>
         </div>
@@ -455,8 +480,10 @@
     const posterHtml = poster
       ? `<img src="${esc(poster)}" alt="" loading="lazy">`
       : `<div class="battle-result-placeholder">🎬</div>`;
+    const placeIcon = item.place === 1 ? 'crown' : 'medal';
     return `
       <div class="battle-result-card battle-result-card--${size} battle-result-stagger" data-place="${item.place}">
+        <div class="battle-result-medal battle-result-medal--${item.place}">${icon(placeIcon)}</div>
         <div class="battle-result-place">#${item.place}</div>
         <div class="battle-result-poster">${posterHtml}</div>
         <h3>${esc(movie.title)}</h3>
@@ -474,7 +501,7 @@
     let body;
     if (isTop10) {
       body = `
-        <h2 class="battle-results-title battle-fade-in">Ваш личный рейтинг</h2>
+        <h2 class="battle-results-title battle-fade-in">${icon('trophy')}Ваш личный рейтинг</h2>
         <div class="battle-results-list battle-fade-in">
           ${results.map((item) => `
             <div class="battle-results-row battle-result-stagger" data-place="${item.place}">
@@ -497,7 +524,7 @@
       const third = ordered.find((r) => r.place === 3) || ordered[2];
 
       body = `
-        <h2 class="battle-results-title battle-fade-in">Ваш топ-3 готов</h2>
+        <h2 class="battle-results-title battle-fade-in">${icon('trophy')}Ваш топ-3 готов</h2>
         <div class="battle-results-podium battle-fade-in">
           ${second ? buildResultCard(second, 'second') : ''}
           ${first ? buildResultCard(first, 'first') : ''}
@@ -509,16 +536,16 @@
 
     panel().innerHTML = `
       <header class="battle-header">
-        <h2 class="battle-header-title">${esc(modeHeaderLabel())}</h2>
+        <h2 class="battle-header-title">${icon('trophy')}${esc(modeHeaderLabel())}</h2>
         <button type="button" class="battle-close-btn" data-action="close" aria-label="Закрыть">✕</button>
       </header>
       ${body}
       <div class="battle-final-actions battle-fade-in">
         <button type="button" class="battle-btn battle-btn--primary" data-action="save"${state.saved ? ' disabled' : ''}>
-          ${state.saved ? 'Сохранено' : 'Сохранить результат'}
+          ${state.saved ? `${icon('check')}Сохранено` : `${icon('check')}Сохранить результат`}
         </button>
-        <button type="button" class="battle-btn battle-btn--ghost" data-action="replay">Сыграть ещё раз</button>
-        <button type="button" class="battle-btn battle-btn--ghost" data-action="modes">Другой режим</button>
+        <button type="button" class="battle-btn battle-btn--ghost" data-action="replay">${icon('refresh')}Сыграть ещё раз</button>
+        <button type="button" class="battle-btn battle-btn--ghost" data-action="modes">${icon('swords')}Другой режим</button>
         <button type="button" class="battle-btn battle-btn--ghost" data-action="close-finish">Закрыть</button>
       </div>
       <div id="battle-save-error" class="battle-save-error hidden"></div>
@@ -560,7 +587,7 @@
       state.saved = true;
       const saveBtn = panel().querySelector('[data-action="save"]');
       if (saveBtn) {
-        saveBtn.textContent = 'Сохранено';
+        saveBtn.innerHTML = `${icon('check')}Сохранено`;
         saveBtn.disabled = true;
       }
       refreshHomeBlock();
@@ -666,7 +693,7 @@
     const modeLabel = L.battleModeLabel(last.mode, last.mediaType || (last.mode === 'series' ? 'tv' : 'movie'));
     topEl.classList.remove('hidden');
     topEl.innerHTML = `
-      <h3 class="battle-home-top-title">Мой топ</h3>
+      <h3 class="battle-home-top-title">${icon('trophy')}Мой топ</h3>
       <p class="battle-home-top-meta">${esc(modeLabel)} · ${new Date(last.createdAt).toLocaleDateString('ru-RU')}</p>
       <ol class="battle-home-top-list">
         ${titles.map((t, i) => `<li><span class="battle-home-rank">${i + 1}</span> ${esc(t)}</li>`).join('')}
@@ -678,6 +705,9 @@
     const section = document.getElementById('battle-section');
     if (!section) return;
     section.querySelector('#battle-start-btn')?.addEventListener('click', () => openBattle());
+    section.querySelectorAll('[data-open-battle]').forEach((card) => {
+      card.addEventListener('click', () => openBattle());
+    });
     refreshHomeBlock();
   }
 

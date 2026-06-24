@@ -5,7 +5,7 @@ let battleMatches = [];
 let pendingDeletedMovieIds = [];
 let moviesRevision = 0;
 let saveChain = Promise.resolve();
-let activeFilters = { status: '', genre: '', tag: '', mediaType: 'movie', search: '', release: 'all' };
+let activeFilters = { status: '', genre: '', tag: '', mediaType: 'movie', search: '', release: 'all', sort: 'added' };
 
 function compactMovieForSave(movie) {
   const meta = { ...(movie.meta || {}) };
@@ -24,11 +24,17 @@ function bumpMoviesRevision() {
   moviesRevision += 1;
 }
 
-const statusLabels = {
-  want: 'Хочу посмотреть',
-  watching: 'Смотрю',
-  watched: 'Посмотрел'
-};
+const T = (key, fallback, vars) => (window.t ? window.t(key, vars) : fallback);
+
+function buildStatusLabels() {
+  return {
+    want: T('status.want', 'Хочу посмотреть'),
+    watching: T('status.watching', 'Смотрю'),
+    watched: T('status.watched', 'Посмотрел')
+  };
+}
+
+let statusLabels = buildStatusLabels();
 
 const historyEventLabels = {
   added: 'Добавлен в список',
@@ -196,18 +202,20 @@ const emptyMessage = document.getElementById('empty-message');
 const filterStatus = document.getElementById('filter-status');
 const filterGenre = document.getElementById('filter-genre');
 const filterTag = document.getElementById('filter-tag');
+const sortBy = document.getElementById('sort-by');
 const listSearch = document.getElementById('list-search');
 const listCountEl = document.getElementById('list-count');
 
 const LIST_VIEW_STORAGE_KEY = 'movieListView';
+const LIST_SORT_STORAGE_KEY = 'movieListSort';
+const VALID_SORTS = ['added', 'rating', 'year', 'title'];
 const COLLAPSED_GROUPS_KEY = 'collapsedStatusGroups';
-const STATUS_ORDER = ['want', 'watching', 'watched'];
+const STATUS_ORDER = ['want', 'watched'];
 
-let storedView = localStorage.getItem(LIST_VIEW_STORAGE_KEY) || 'grid';
-if (storedView === 'compact' || storedView === 'detailed') {
-  storedView = storedView === 'detailed' ? 'list' : 'grid';
-}
-let listViewMode = storedView === 'list' ? 'list' : 'grid';
+let listViewMode = 'grid';
+
+const storedSort = localStorage.getItem(LIST_SORT_STORAGE_KEY);
+if (VALID_SORTS.includes(storedSort)) activeFilters.sort = storedSort;
 
 let collapsedStatusGroups = new Set(
   JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) || '[]')
@@ -270,10 +278,12 @@ function matchesListSearch(movie, query) {
 }
 
 function normalizeMovie(movie) {
+  // Миграция: статус «Смотрю» удалён → переносим в «Хочу посмотреть».
+  const rawStatus = movie.status || 'want';
   const normalized = {
     id: movie.id,
     title: movie.title,
-    status: movie.status || 'want',
+    status: rawStatus === 'watching' ? 'want' : rawStatus,
     rating: movie.rating ?? null,
     watchedAt: movie.watchedAt ?? null,
     addedAt: movie.addedAt ?? null,
@@ -384,13 +394,14 @@ function mergeIntoExistingMovie(existing, data) {
 }
 
 function addMovieInternal(data, { skipDuplicateCheck = false } = {}) {
-  const status = data.status || 'want';
+  // Статус «Смотрю» удалён — мигрируем в «Хочу посмотреть».
+  let status = data.status || 'want';
+  if (status === 'watching') status = 'want';
   const rating = status === 'want' ? null : (data.rating ?? null);
 
-  if (status === 'watched' && (rating === null || rating < 1 || rating > 10)) {
-    return { success: false, error: 'Для «посмотрел» нужна оценка 1–10' };
-  }
-  if (status === 'watching' && rating !== null && (rating < 1 || rating > 10)) {
+  // «Посмотрел» можно добавить без оценки (например, через свайп
+  // «Уже смотрел»). Оценку можно проставить позже.
+  if (status === 'watched' && rating !== null && (rating < 1 || rating > 10)) {
     return { success: false, error: 'Оценка должна быть от 1 до 10' };
   }
 
@@ -840,6 +851,37 @@ function getFilteredMovies() {
   });
 }
 
+function movieAddedTime(m) {
+  return m.addedAt ? Date.parse(m.addedAt) || 0 : 0;
+}
+
+function movieSortRating(m) {
+  return Number(m.rating)
+    || Number(m.meta?.imdb?.rating)
+    || Number(m.meta?.kinopoisk?.rating)
+    || 0;
+}
+
+function sortMovies(arr) {
+  const list = [...arr];
+  switch (activeFilters.sort) {
+    case 'rating':
+      list.sort((a, b) => movieSortRating(b) - movieSortRating(a) || movieAddedTime(b) - movieAddedTime(a));
+      break;
+    case 'year':
+      list.sort((a, b) => (Number(b.meta?.year) || 0) - (Number(a.meta?.year) || 0) || movieAddedTime(b) - movieAddedTime(a));
+      break;
+    case 'title':
+      list.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'ru'));
+      break;
+    case 'added':
+    default:
+      list.sort((a, b) => movieAddedTime(b) - movieAddedTime(a));
+      break;
+  }
+  return list;
+}
+
 function snapshotMovieCore(movie) {
   return `${movie.id}:${movie.status}:${movie.mediaType || 'movie'}:${movie.rating ?? ''}`;
 }
@@ -878,12 +920,23 @@ function closeAllMovieMenus() {
   });
 }
 
+// Клик по постеру/названию открывает страницу фильма (/movie.html), если у
+// фильма есть tmdbId. Иначе (нераспознанный фильм без tmdbId) — оставляем
+// прежнее поведение: ссылку на поиск HDRezka в новой вкладке.
+function getMoviePageHref(movie) {
+  return window.MovieDisplay?.moviePageUrl(movie) || null;
+}
+
 function buildMovieGridPosterHtml(movie, watchUrl) {
   const safeTitle = escapeHtml(movie.title);
   const posterUrl = window.MovieDisplay?.posterUrl(movie.meta?.poster) || movie.meta?.poster;
   const posterInner = posterUrl
     ? `<img class="movie-poster--grid" src="${escapeHtml(posterUrl)}" alt="${safeTitle}" loading="lazy" decoding="async">`
     : '<div class="movie-poster--empty movie-poster--grid">🎬</div>';
+  const pageHref = getMoviePageHref(movie);
+  if (pageHref) {
+    return `<a href="${pageHref}" class="movie-poster-link movie-poster-link--grid" title="Открыть страницу фильма">${posterInner}</a>`;
+  }
   return `<a href="${watchUrl}" target="_blank" rel="noopener noreferrer" class="movie-poster-link movie-poster-link--grid" title="Смотреть на HDRezka">${posterInner}</a>`;
 }
 
@@ -893,6 +946,10 @@ function buildMoviePosterHtml(movie, watchUrl) {
   const posterInner = posterUrl
     ? `<img class="movie-poster" src="${escapeHtml(posterUrl)}" alt="${safeTitle}" loading="lazy" decoding="async">`
     : '<div class="movie-poster movie-poster--empty">🎬</div>';
+  const pageHref = getMoviePageHref(movie);
+  if (pageHref) {
+    return `<a href="${pageHref}" class="movie-poster-link" title="Открыть страницу фильма">${posterInner}</a>`;
+  }
   return `<a href="${watchUrl}" target="_blank" rel="noopener noreferrer" class="movie-poster-link" title="Смотреть на HDRezka">${posterInner}</a>`;
 }
 
@@ -922,10 +979,15 @@ function buildMovieDetailsHtml(movie, watchUrl) {
   const tagsHtml = [...movie.genres, ...movie.tags]
     .map((t) => `<span class="tag-chip">${t}</span>`).join('');
 
+  const pageHref = getMoviePageHref(movie);
+  const titleLink = pageHref
+    ? `<a href="${pageHref}" class="movie-title-link" title="Открыть страницу фильма">${safeTitle}</a>`
+    : `<a href="${watchUrl}" target="_blank" rel="noopener noreferrer" class="movie-title-link">${safeTitle}</a>`;
+
   return `
     <div class="movie-info">
       <h3 class="movie-title-row">
-        <a href="${watchUrl}" target="_blank" rel="noopener noreferrer" class="movie-title-link">${safeTitle}</a>
+        ${titleLink}
         ${typeBadge}
         ${releaseBadge}
         ${originalTitleHtml}
@@ -974,9 +1036,8 @@ function buildMovieActionsHtml(movie, variant = 'list') {
         <button type="button" class="movie-card-menu-btn" aria-label="Действия" aria-haspopup="true">⋮</button>
         <div class="movie-card-menu-dropdown hidden">
           <div class="movie-card-menu-section">Статус</div>
-          <button type="button" class="menu-item menu-item--status${movie.status === 'want' ? ' menu-item--active' : ''}" data-status="want" data-id="${movie.id}">Хочу посмотреть</button>
-          <button type="button" class="menu-item menu-item--status${movie.status === 'watching' ? ' menu-item--active' : ''}" data-status="watching" data-id="${movie.id}">Смотрю</button>
-          <button type="button" class="menu-item menu-item--status${movie.status === 'watched' ? ' menu-item--active' : ''}" data-status="watched" data-id="${movie.id}">Посмотрел</button>
+          <button type="button" class="menu-item menu-item--status${movie.status === 'want' ? ' menu-item--active' : ''}" data-status="want" data-id="${movie.id}">${statusLabels.want}</button>
+          <button type="button" class="menu-item menu-item--status${movie.status === 'watched' ? ' menu-item--active' : ''}" data-status="watched" data-id="${movie.id}">${statusLabels.watched}</button>
           <div class="movie-card-menu-divider"></div>
           <button type="button" class="menu-item btn-fix-poster" data-id="${movie.id}">Исправить постер</button>
           <button type="button" class="menu-item btn-history" data-id="${movie.id}">История</button>
@@ -1104,7 +1165,9 @@ function createMovieGridItem(movie) {
     </div>
     ${buildMovieActionsHtml(movie, 'grid')}
     <div class="movie-grid-body">
-      <a href="${watchUrl}" target="_blank" rel="noopener noreferrer" class="movie-title-link movie-grid-title" title="${safeTitle}">${safeTitle}</a>
+      ${getMoviePageHref(movie)
+        ? `<a href="${getMoviePageHref(movie)}" class="movie-title-link movie-grid-title" title="${safeTitle}">${safeTitle}</a>`
+        : `<a href="${watchUrl}" target="_blank" rel="noopener noreferrer" class="movie-title-link movie-grid-title" title="${safeTitle}">${safeTitle}</a>`}
       ${typeBadge || releaseBadge ? `<div class="movie-grid-tags">${typeBadge}${releaseBadge}</div>` : ''}
       ${metaParts.length ? `<p class="movie-grid-meta">${escapeHtml(metaParts.join(' · '))}</p>` : ''}
     </div>
@@ -1142,7 +1205,7 @@ function renderGroupedGrid(tabMovies) {
   STATUS_ORDER.forEach((status) => {
     if (activeFilters.status && activeFilters.status !== status) return;
 
-    const items = tabMovies.filter((movie) => movie.status === status);
+    const items = sortMovies(tabMovies.filter((movie) => movie.status === status));
 
     const section = document.createElement('section');
     section.className = 'status-group';
@@ -1181,7 +1244,7 @@ function renderGroupedGrid(tabMovies) {
 function renderFlatList(filtered) {
   const list = document.createElement('ul');
   list.className = 'movie-list-flat';
-  filtered.forEach((movie) => list.appendChild(createMovieListItem(movie)));
+  sortMovies(filtered).forEach((movie) => list.appendChild(createMovieListItem(movie)));
   movieList.appendChild(list);
 }
 
@@ -1189,12 +1252,13 @@ function updateListCount(filteredCount) {
   if (!listCountEl) return;
   const totalInTab = movies.filter((m) => (m.mediaType || 'movie') === activeFilters.mediaType).length;
   listCountEl.textContent = filteredCount === totalInTab
-    ? `${filteredCount} в списке`
-    : `Показано ${filteredCount} из ${totalInTab}`;
+    ? T('list.inList', `${filteredCount} в списке`, { n: filteredCount })
+    : T('list.shownOf', `Показано ${filteredCount} из ${totalInTab}`, { n: filteredCount, total: totalInTab });
 }
 
 function syncFilterUI() {
   if (filterStatus) filterStatus.value = activeFilters.status || '';
+  if (sortBy) sortBy.value = activeFilters.sort || 'added';
 
   if (filterGenre) {
     const genre = activeFilters.genre || '';
@@ -1229,13 +1293,15 @@ function syncFilterUI() {
     const type = tab.dataset.media;
     tab.classList.toggle('media-tab--active', type === activeFilters.mediaType);
     const count = movies.filter((m) => (m.mediaType || 'movie') === type).length;
-    const label = type === 'tv' ? 'Сериалы' : 'Фильмы';
+    const label = type === 'tv' ? T('list.tabSeries', 'Сериалы') : T('list.tabMovies', 'Фильмы');
     tab.textContent = count ? `${label} (${count})` : label;
   });
 
   const listTitle = document.getElementById('list-title');
   if (listTitle) {
-    listTitle.textContent = activeFilters.mediaType === 'tv' ? 'Мои сериалы' : 'Мои фильмы';
+    listTitle.textContent = activeFilters.mediaType === 'tv'
+      ? T('list.titleSeries', 'Мои сериалы')
+      : T('list.title', 'Мои фильмы');
   }
 
   const addSeriesBtn = document.getElementById('add-series-btn');
@@ -1289,7 +1355,7 @@ function renderMovies() {
   if (movies.length === 0) {
     if (emptyMessage) {
       emptyMessage.style.display = 'block';
-      emptyMessage.textContent = 'Пока нет фильмов и сериалов. Импортируйте список или напишите AI-помощнику.';
+      emptyMessage.textContent = T('list.emptyAll', 'Пока нет фильмов и сериалов. Импортируйте список или напишите AI-помощнику.');
     }
     if (listCountEl) listCountEl.textContent = '';
     return;
@@ -1298,18 +1364,18 @@ function renderMovies() {
   if (filtered.length === 0) {
     if (emptyMessage) {
       emptyMessage.style.display = 'block';
-      const typeLabel = activeFilters.mediaType === 'tv' ? 'сериалов' : 'фильмов';
+      const typeLabel = activeFilters.mediaType === 'tv' ? T('list.ofSeries', 'сериалов') : T('list.ofMovies', 'фильмов');
       if (activeFilters.search) {
-        emptyMessage.textContent = `По запросу «${activeFilters.search}» ничего не найдено.`;
+        emptyMessage.textContent = T('list.noSearch', `По запросу «${activeFilters.search}» ничего не найдено.`, { q: activeFilters.search });
       } else if (activeFilters.release === 'premieres') {
-        emptyMessage.textContent = `Нет предстоящих премьер среди ${typeLabel}.`;
+        emptyMessage.textContent = T('list.noPremieres', `Нет предстоящих премьер среди ${typeLabel}.`, { type: typeLabel });
       } else if (activeFilters.release === 'released') {
-        emptyMessage.textContent = `Нет вышедших ${typeLabel} по выбранным фильтрам.`;
+        emptyMessage.textContent = T('list.noReleased', `Нет вышедших ${typeLabel} по выбранным фильтрам.`, { type: typeLabel });
       } else if (activeFilters.status) {
         const statusLabel = statusLabels[activeFilters.status] || activeFilters.status;
-        emptyMessage.textContent = `Нет ${typeLabel} со статусом «${statusLabel}». Выберите «Все статусы» в фильтре выше.`;
+        emptyMessage.textContent = T('list.noStatus', `Нет ${typeLabel} со статусом «${statusLabel}». Выберите «Все статусы» в фильтре выше.`, { type: typeLabel, status: statusLabel });
       } else {
-        emptyMessage.textContent = `Нет ${typeLabel} по выбранным фильтрам.`;
+        emptyMessage.textContent = T('list.noFilters', `Нет ${typeLabel} по выбранным фильтрам.`, { type: typeLabel });
       }
     }
     updateListCount(0);
@@ -1326,6 +1392,15 @@ function renderMovies() {
   }
 }
 
+// Смена языка: пересобираем подписи статусов и перерисовываем список и
+// зависимые блоки, чтобы динамический интерфейс тоже переводился.
+document.addEventListener('i18n:change', () => {
+  statusLabels = buildStatusLabels();
+  try { renderMovies(); } catch (e) { /* список ещё не готов */ }
+  window.refreshExtendedFeatures?.();
+  window.BattleUI?.refresh?.();
+});
+
 function saveMovies() {
   saveChain = saveChain
     .then(() => flushSaveMovies())
@@ -1337,6 +1412,23 @@ function saveMovies() {
 }
 
 async function flushSaveMovies() {
+  // Гостевой режим: сохраняем список локально (перенесётся в аккаунт при входе).
+  if (window.GuestStore && window.GuestStore.isActive()) {
+    window.GuestStore.saveMovies(
+      compactMoviesForSave(movies),
+      nextId,
+      battleSessions,
+      battleMatches
+    );
+    pendingDeletedMovieIds = [];
+    renderMovies();
+    window.refreshStats?.();
+    window.refreshAccountPage?.();
+    window.refreshExtendedFeatures?.();
+    window.BattleUI?.refresh?.();
+    return true;
+  }
+
   let staleRetries = 0;
 
   while (true) {
@@ -1410,6 +1502,27 @@ async function flushSaveMovies() {
 }
 
 async function loadMovies(options = {}) {
+  // Гостевой режим: список читается из локального гостевого хранилища.
+  if (window.GuestStore && window.GuestStore.isActive()) {
+    const data = window.GuestStore.load();
+    movies = (data.movies || []).map(normalizeMovie);
+    nextId = data.nextId || 1;
+    battleSessions = Array.isArray(data.battleSessions) ? data.battleSessions : [];
+    battleMatches = Array.isArray(data.battleMatches) ? data.battleMatches : [];
+    pendingDeletedMovieIds = [];
+    moviesRevision = 0;
+    saveChain = Promise.resolve();
+
+    activeFilters.status = '';
+    activeFilters.genre = '';
+    activeFilters.tag = '';
+    activeFilters.search = '';
+    activeFilters.release = 'all';
+
+    renderMovies();
+    return;
+  }
+
   const response = await fetch('/api/movies', {
     cache: 'no-store',
     headers: window.authHeaders()
@@ -1485,6 +1598,14 @@ if (listSearch) {
 document.querySelectorAll('.release-filter-btn').forEach((btn) => {
   btn.addEventListener('click', () => setFilter('release', btn.dataset.release));
 });
+
+if (sortBy) {
+  sortBy.addEventListener('change', (e) => {
+    const value = VALID_SORTS.includes(e.target.value) ? e.target.value : 'added';
+    localStorage.setItem(LIST_SORT_STORAGE_KEY, value);
+    setFilter('sort', value);
+  });
+}
 
 document.querySelectorAll('.media-tab').forEach((tab) => {
   tab.addEventListener('click', () => setMediaFilter(tab.dataset.media));

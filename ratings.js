@@ -174,6 +174,7 @@ export async function fetchExternalRatings({ imdbId, title, year, matchedTitle, 
     originalTitle: hdrezka?.originalTitle || originalTitle || null,
     imdb: hdrezka?.imdb?.rating ? hdrezka.imdb : api.imdb,
     kinopoisk: hdrezka?.kinopoisk?.rating ? hdrezka.kinopoisk : api.kinopoisk,
-    hdrezkaUrl: hdrezka?.hdrezkaUrl || null
+    hdrezkaUrl: hdrezka?.hdrezkaUrl || null,
+    hdrezkaConfident: hdrezka?.hdrezkaConfident === true
   };
 }

@@ -18,7 +18,10 @@ import {
 import { pickRandomTitles, randomRating } from './moviePool.js';
 import { pickBestTmdbResult } from './tmdbMatch.js';
 import { resolveSearchQuery, buildTmdbSearchQueries } from './titleAliases.js';
-import { resolveHdrezkaMovie } from './hdrezka.js';
+import { localizePersonName } from './titleTransliterate.js';
+import { resolveHdrezkaMovie, fetchHdrezkaPersonInfo } from './hdrezka.js';
+import { getPlayer } from './scrapers/player.js';
+import { searchTorrents, downloadTorrentFile } from './scrapers/torrentSearch.js';
 import { resolveKinogoMovie, buildKinogoSearchUrl } from './kinogo.js';
 import { initGlobalSignals, recordInteraction, getSocialScore, getTopLiked } from './globalSignals.js';
 import { fetchExternalRatings } from './ratings.js';
@@ -88,6 +91,12 @@ import {
 import { buildCategoryProfile } from './filmCategories.js';
 import { buildSiteRatings } from './siteRatings.js';
 import {
+  getCatalogIndex,
+  getCatalogCollection,
+  getCatalogTop200,
+  getHomeRails
+} from './catalog.js';
+import {
   buildGraph,
   setSimilarEdges,
   graphCollaborativeCandidates,
@@ -117,7 +126,7 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
@@ -937,6 +946,28 @@ async function tmdbFetch(endpoint, params = {}, options = {}) {
   return response.json();
 }
 
+// Язык TMDB-описаний/названий → формат API.
+function normalizeTmdbLanguage(lang) {
+  return lang === 'en' || lang === 'en-US' ? 'en-US' : 'ru-RU';
+}
+
+/* Обёртка над tmdbFetch, привязанная к языку пользователя. Все запросы,
+   которые отдают отображаемые названия/описания (discover, trending, similar,
+   search, details), получают язык пользователя. ИСКЛЮЧЕНИЕ — справочник жанров
+   (`/genre/...`): он используется как канонический (русские имена жанров —
+   ключи во всех конфигах и в логике рекомендаций), поэтому всегда ru-RU.
+   Явно заданный options.language имеет приоритет (напр. поиск ключевых слов
+   принудительно en-US). */
+function makeLocalizedTmdbFetch(lang) {
+  const language = normalizeTmdbLanguage(lang);
+  return (endpoint, params = {}, options = {}) => {
+    if (typeof endpoint === 'string' && endpoint.startsWith('/genre/')) {
+      return tmdbFetch(endpoint, params, { ...options, language: 'ru-RU' });
+    }
+    return tmdbFetch(endpoint, params, { ...options, language: options.language || language });
+  };
+}
+
 const TITLE_RULE = 'title: официальное русское название как на HDRezka/Кинопоиске. originalTitle (опционально): оригинальное английское название для поиска в TMDB — указывай, если знаете (Riverdale, Breaking Bad, The Office). Примеры: «Ривердейл» + originalTitle «Riverdale»; «Помни» + «Memento».';
 
 function upgradeTmdbPosterUrl(url, size = 'w780') {
@@ -993,19 +1024,42 @@ function mapSearchResult(m, mediaType = 'movie') {
   };
 }
 
-function mapCreditsMeta(credits) {
-  const directorCrew = credits?.crew?.find((c) => c.job === 'Director');
-  const castList = (credits?.cast || []).slice(0, 8);
+function mapCreditsMeta(credits, lang = 'ru-RU') {
+  const crew = credits?.crew || [];
+  const directorCrew = crew.find((c) => c.job === 'Director');
+  const castList = (credits?.cast || []).slice(0, 12);
+  // В англоязычном режиме кириллические имена (русские актёры/режиссёры,
+  // которых TMDB отдаёт кириллицей) транслитерируем в латиницу.
+  const nm = (name) => localizePersonName(name, lang);
+
+  // Сценаристы: department «Writing» или известные роли. Дедуп по id.
+  const seenWriters = new Set();
+  const writerDetails = [];
+  for (const c of crew) {
+    const isWriter = c.department === 'Writing'
+      || ['Writer', 'Screenplay', 'Story', 'Author', 'Novel'].includes(c.job);
+    if (isWriter && c.id && !seenWriters.has(c.id)) {
+      seenWriters.add(c.id);
+      writerDetails.push({ id: c.id, name: nm(c.name), job: c.job || null });
+    }
+  }
+
   return {
-    director: directorCrew?.name || null,
+    director: directorCrew ? nm(directorCrew.name) : null,
     directorId: directorCrew?.id || null,
-    cast: castList.map((c) => c.name).join(', ') || null,
-    castDetails: castList.map((c) => ({ id: c.id, name: c.name }))
+    writers: writerDetails.map((w) => w.name).join(', ') || null,
+    writerDetails: writerDetails.slice(0, 6),
+    cast: castList.map((c) => nm(c.name)).join(', ') || null,
+    castDetails: castList.map((c) => ({
+      id: c.id,
+      name: nm(c.name),
+      character: c.character ? nm(c.character) : null
+    }))
   };
 }
 
-function mapTmdbMovie(movie, credits, matchSource = 'auto', externalRatings = null, mediaType = 'movie') {
-  const creditMeta = mapCreditsMeta(credits);
+function mapTmdbMovie(movie, credits, matchSource = 'auto', externalRatings = null, mediaType = 'movie', lang = 'ru-RU') {
+  const creditMeta = mapCreditsMeta(credits, lang);
   const imdbId = movie.imdb_id || movie.external_ids?.imdb_id || null;
   const displayTitle = externalRatings?.title || movie.title || movie.name;
   const releaseDate = movie.release_date || movie.first_air_date || null;
@@ -1030,6 +1084,8 @@ function mapTmdbMovie(movie, credits, matchSource = 'auto', externalRatings = nu
     country: movie.production_countries?.[0]?.name || null,
     cast: creditMeta.cast,
     castDetails: creditMeta.castDetails,
+    writers: creditMeta.writers,
+    writerDetails: creditMeta.writerDetails,
     matchedTitle: externalRatings?.fullTitle || displayTitle,
     originalTitle: externalRatings?.originalTitle || movie.original_title || movie.original_name || null,
     matchSource,
@@ -1070,9 +1126,12 @@ function cacheSet(cache, key, data) {
   if (cache.size > 300) cache.delete(cache.keys().next().value);
 }
 
+// Нормализуем язык интерфейса (ru|en) в формат TMDB (ru-RU|en-US).
 // «Ядро» — только TMDB, без внешнего скрейпинга. Быстро и кэшируется.
-async function loadTmdbCore(tmdbId, mediaType = 'movie') {
-  const cacheKey = `${mediaType}:${tmdbId}`;
+// language — язык описания/названий из TMDB (зависит от выбора пользователя).
+async function loadTmdbCore(tmdbId, mediaType = 'movie', language = 'ru-RU') {
+  const lang = normalizeTmdbLanguage(language);
+  const cacheKey = `${mediaType}:${tmdbId}:${lang}`;
   const cached = cacheGet(tmdbCoreCache, cacheKey);
   if (cached) return cached;
 
@@ -1080,11 +1139,11 @@ async function loadTmdbCore(tmdbId, mediaType = 'movie') {
   const movie = await tmdbFetch(endpoint, {
     append_to_response: 'credits,external_ids,videos',
     include_video_language: 'ru,en,null'
-  });
+  }, { language: lang });
   if (!movie) return null;
 
   // Маппим без внешних рейтингов (передаём null) — добавим их позже.
-  const mapped = mapTmdbMovie(movie, movie.credits, 'auto', null, mediaType);
+  const mapped = mapTmdbMovie(movie, movie.credits, 'auto', null, mediaType, lang);
   mapped._raw = {
     imdbId: movie.imdb_id || movie.external_ids?.imdb_id || null,
     baseTitle: movie.original_title || movie.original_name || movie.title || movie.name,
@@ -1120,7 +1179,10 @@ async function loadTmdbExtras(core, mediaType = 'movie') {
     imdb: externalRatings?.imdb || null,
     kinopoisk: externalRatings?.kinopoisk || null,
     hdrezkaUrl: externalRatings?.hdrezkaUrl || null,
-    kinogoUrl: kinogo?.url || buildKinogoSearchUrl(matchedTitle)
+    // matched=true только когда нашли точную страницу фильма (не поиск).
+    hdrezkaMatched: Boolean(externalRatings?.hdrezkaUrl && externalRatings?.hdrezkaConfident),
+    kinogoUrl: kinogo?.url || buildKinogoSearchUrl(matchedTitle),
+    kinogoMatched: kinogo?.source === 'resolved' && Boolean(kinogo?.url)
   };
   cacheSet(tmdbExtrasCache, cacheKey, extras);
   return extras;
@@ -1926,6 +1988,182 @@ app.post('/api/register', (req, res) => {
   res.json({ token: createSession(username), username });
 });
 
+// Генерация короткого кода восстановления (без похожих символов 0/O/1/I).
+function generateRecoveryCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += alphabet[crypto.randomInt(alphabet.length)];
+  }
+  return code;
+}
+
+function bindDevice(user, deviceId) {
+  if (!deviceId) return;
+  if (!Array.isArray(user.devices)) user.devices = [];
+  if (!user.devices.includes(deviceId)) user.devices.push(deviceId);
+}
+
+// Проверка кода: подходит и код восстановления, и старый пароль (совместимость).
+function verifyUserCode(user, code) {
+  if (!code) return false;
+  if (user.recoveryHash && user.recoverySalt &&
+      user.recoveryHash === hashPassword(code, user.recoverySalt)) return true;
+  if (user.hash && user.salt &&
+      user.hash === hashPassword(code, user.salt)) return true;
+  return false;
+}
+
+// Тихий вход по устройству: если это устройство уже привязано к аккаунту —
+// пускаем без ввода чего-либо. Так PWA «помнит» пользователя после перезапуска.
+app.post('/api/auth-device', (req, res) => {
+  const deviceId = String(req.body?.deviceId || '').trim();
+  if (!deviceId) return res.status(400).json({ error: 'Нет идентификатора устройства' });
+
+  const users = loadUsers();
+  const username = Object.keys(users).find((name) =>
+    Array.isArray(users[name].devices) && users[name].devices.includes(deviceId));
+  if (!username) return res.status(404).json({ error: 'Устройство не привязано' });
+
+  users[username].lastActiveAt = new Date().toISOString();
+  saveUsers(users);
+  res.json({ token: createSession(username), username });
+});
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// Вход/регистрация только по email — без пароля. Если email новый, аккаунт
+// создаётся автоматически. Устройство привязывается для тихого входа потом.
+// Старые /api/login и /api/register остаются для совместимости.
+app.post('/api/auth', (req, res) => {
+  const email = String(req.body?.email || req.body?.name || '').trim().toLowerCase();
+  const deviceId = String(req.body?.deviceId || '').trim();
+
+  if (!email) return res.status(400).json({ error: 'Введите email' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'Введите корректный email' });
+
+  const users = loadUsers();
+  const existing = findCanonicalUsername(users, email);
+  const now = new Date().toISOString();
+
+  if (existing) {
+    const user = users[existing];
+    bindDevice(user, deviceId);
+    user.lastActiveAt = now;
+    if (!user.email) user.email = existing;
+    saveUsers(users);
+    return res.json({ token: createSession(existing), username: existing, created: false });
+  }
+
+  // Новый аккаунт: email как идентификатор, без пароля.
+  users[email] = {
+    email,
+    registeredAt: now,
+    lastActiveAt: now,
+    devices: deviceId ? [deviceId] : []
+  };
+  saveUsers(users);
+  initUserMovies(email);
+  res.json({ token: createSession(email), username: email, created: true });
+});
+
+// ── Вход по номеру телефона + SMS-код ──────────────────────────────
+// Сейчас SMS не отправляется реально: используется временный код 1234.
+// Структура готова к подключению реального провайдера: достаточно
+// реализовать sendSmsCode() и хранить/проверять сгенерированный код.
+const MOCK_SMS_CODE = '1234';
+const SMS_CODE_TTL_MS = 5 * 60 * 1000; // 5 минут
+const smsCodes = new Map(); // phone -> { code, expiresAt }
+
+// Нормализация телефона в единый идентификатор: оставляем цифры и ведущий «+».
+function normalizePhone(raw) {
+  let value = String(raw || '').trim();
+  if (!value) return '';
+  const hasPlus = value.startsWith('+');
+  const digits = value.replace(/\D/g, '');
+  if (!digits) return '';
+  return hasPlus ? `+${digits}` : digits;
+}
+
+function isValidPhone(phone) {
+  // 7–15 цифр (E.164), необязательный ведущий «+».
+  return /^\+?\d{7,15}$/.test(phone);
+}
+
+function findUserByPhone(users, phone) {
+  if (users[phone]) return phone;
+  return Object.keys(users).find((name) => users[name]?.phone === phone) || null;
+}
+
+// Заглушка отправки SMS. В реальной интеграции здесь будет вызов провайдера
+// (Twilio/SMS.ru/Vonage и т.п.) и генерация случайного кода через crypto.
+// Возвращает код, который «отправлен» пользователю.
+function sendSmsCode(phone) {
+  const code = MOCK_SMS_CODE;
+  smsCodes.set(phone, { code, expiresAt: Date.now() + SMS_CODE_TTL_MS });
+  // TODO: подключить реального SMS-провайдера и отправить `code` на `phone`.
+  return code;
+}
+
+function verifySmsCode(phone, code) {
+  const entry = smsCodes.get(phone);
+  const cleaned = String(code || '').trim();
+  if (entry && entry.expiresAt > Date.now() && entry.code === cleaned) return true;
+  // Совместимость/упрощение на время разработки: фиксированный код всегда подходит.
+  if (cleaned === MOCK_SMS_CODE) return true;
+  return false;
+}
+
+// Шаг 1: запросить код. Реальная отправка пока не выполняется (mock 1234).
+app.post('/api/auth/request-code', (req, res) => {
+  const phone = normalizePhone(req.body?.phone);
+  if (!phone) return res.status(400).json({ error: 'Введите номер телефона' });
+  if (!isValidPhone(phone)) return res.status(400).json({ error: 'Введите корректный номер телефона' });
+
+  sendSmsCode(phone);
+  // devCode отдаём только чтобы было видно, что используется mock-код.
+  res.json({ success: true, phone, devCode: MOCK_SMS_CODE });
+});
+
+// Шаг 2: проверить код и войти/создать аккаунт по номеру телефона.
+app.post('/api/auth/verify-code', (req, res) => {
+  const phone = normalizePhone(req.body?.phone);
+  const code = String(req.body?.code || '').trim();
+  const deviceId = String(req.body?.deviceId || '').trim();
+
+  if (!phone || !isValidPhone(phone)) return res.status(400).json({ error: 'Введите корректный номер телефона' });
+  if (!code) return res.status(400).json({ error: 'Введите код из SMS' });
+  if (!verifySmsCode(phone, code)) return res.status(401).json({ error: 'Неверный код. Попробуйте ещё раз.' });
+
+  smsCodes.delete(phone);
+
+  const users = loadUsers();
+  const existing = findUserByPhone(users, phone);
+  const now = new Date().toISOString();
+
+  if (existing) {
+    const user = users[existing];
+    bindDevice(user, deviceId);
+    user.lastActiveAt = now;
+    if (!user.phone) user.phone = phone;
+    saveUsers(users);
+    return res.json({ token: createSession(existing), username: existing, phone, created: false });
+  }
+
+  // Новый аккаунт: номер телефона — основной идентификатор.
+  users[phone] = {
+    phone,
+    registeredAt: now,
+    lastActiveAt: now,
+    devices: deviceId ? [deviceId] : []
+  };
+  saveUsers(users);
+  initUserMovies(phone);
+  res.json({ token: createSession(phone), username: phone, phone, created: true });
+});
+
 app.post('/api/login', (req, res) => {
   const requestedUsername = String(req.body?.username || '').trim();
   const { password } = req.body;
@@ -2082,7 +2320,7 @@ app.get('/api/movie/details/:tmdbId', async (req, res) => {
   // Отдаём только «ядро» (TMDB) — это быстро. Тяжёлые рейтинги/ссылки на Kinogo
   // фронтенд подгружает отдельным запросом (/api/movie/extras), чтобы страница
   // фильма открывалась мгновенно, не дожидаясь веб-скрейпинга.
-  const data = await loadTmdbCore(req.params.tmdbId, mediaType);
+  const data = await loadTmdbCore(req.params.tmdbId, mediaType, req.query.lang);
   if (!data) return res.status(503).json({ error: 'TMDB API недоступен' });
   // Средняя оценка по сайту среди пользователей (из их списков) — локально, быстро.
   if (data.meta) {
@@ -2104,6 +2342,121 @@ app.get('/api/movie/extras/:tmdbId', async (req, res) => {
   if (!core) return res.status(503).json({ error: 'TMDB API недоступен' });
   const extras = await loadTmdbExtras(core, mediaType);
   res.json(extras || {});
+});
+
+// Нативный плеер HDRezka: прямые видеопотоки (.mp4) с выбором качества и
+// озвучки. Публичный эндпоинт (доступен и гостям). Потоки кэшируются на сервере
+// (метаданные 6ч, ссылки 30 мин — токены потоков «протухают»).
+// Query: ?type=movie|tv&translator=<id> (translator опционален — для смены озвучки).
+app.get('/api/movie/player/:tmdbId', async (req, res) => {
+  optionalAuth(req);
+  const mediaType = req.query.type === 'tv' ? 'tv' : 'movie';
+  const translator = req.query.translator ? String(req.query.translator) : null;
+  try {
+    const core = await loadTmdbCore(req.params.tmdbId, mediaType);
+    if (!core) return res.status(503).json({ error: 'TMDB API недоступен' });
+
+    const title = core.meta?.matchedTitle || core.title;
+    const originalTitle = core.meta?.originalTitle || core._raw?.baseTitle || null;
+    const year = core._raw?.year || core.meta?.year || null;
+
+    const data = await getPlayer(req.params.tmdbId, mediaType, title, year, originalTitle, translator);
+    if (!data || !data.qualities?.length) return res.json({ error: 'not found' });
+    res.json(data);
+  } catch (err) {
+    if (RECOMMENDER_DEBUG) console.error('[player] failed', err?.message);
+    res.json({ error: 'not found' });
+  }
+});
+
+/* ===================================================================
+   ТОРРЕНТЫ — поиск раздач (Rutor) и проксированное скачивание .torrent.
+   Публичные эндпоинты (optionalAuth). Поиск кэшируется в памяти (15 мин).
+   =================================================================== */
+
+// Поиск раздач по названию. Возвращает массив результатов или [] при ошибке.
+app.get('/api/torrents/search', async (req, res) => {
+  optionalAuth(req);
+  const query = String(req.query.query || '').trim();
+  const type = req.query.type === 'tv' ? 'tv' : 'movie';
+  if (!query) return res.json([]);
+  try {
+    const results = await searchTorrents(query, type);
+    res.json(results);
+  } catch (err) {
+    if (RECOMMENDER_DEBUG) console.error('[torrents] search failed', err?.message);
+    res.json([]);
+  }
+});
+
+// Прокси .torrent-файла: качаем от имени сервера (обход CORS/Referer) и отдаём
+// клиенту с правильным Content-Type и именем файла.
+app.get('/api/torrents/download', async (req, res) => {
+  optionalAuth(req);
+  const url = String(req.query.url || '').trim();
+  if (!url) return res.status(400).json({ error: 'Не указана ссылка' });
+  try {
+    const { buffer, contentType, filename } = await downloadTorrentFile(url);
+    const safeName = filename.replace(/["\\\r\n]/g, '').slice(0, 200) || 'download.torrent';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+    res.send(buffer);
+  } catch (err) {
+    if (RECOMMENDER_DEBUG) console.error('[torrents] download failed', err?.message);
+    res.status(502).json({ error: 'Не удалось скачать торрент' });
+  }
+});
+
+/* ===================================================================
+   КАТАЛОГ ФИЛЬМОВ — готовые подборки поверх TMDB.
+   Публичные эндпоинты (гость может смотреть). Качество подборок —
+   взвешенный (Байесовский) рейтинг + средняя оценка по сайту.
+   =================================================================== */
+
+// Зависимости для catalog.js: доступ к TMDB и к локальным оценкам сайта.
+// tmdbFetch привязан к языку пользователя → названия/описания фильмов из TMDB
+// приходят на выбранном языке (справочник жанров остаётся каноническим, ru).
+function catalogDeps(lang) {
+  return { tmdbFetch: makeLocalizedTmdbFetch(lang), tmdbPosterFromPath, getSiteRating, getGenreNameMap };
+}
+
+// Лёгкий список подборок — без обращения к TMDB. ?lang=ru|en — язык подписей.
+app.get('/api/catalog', (req, res) => {
+  res.json(getCatalogIndex(req.query.lang));
+});
+
+// Курируемые ленты для главной страницы (визуальные подборки). Лёгкий
+// ответ без TMDB: фронтенд лениво подгружает фильмы каждой ленты.
+app.get('/api/catalog/home', (req, res) => {
+  res.json(getHomeRails(req.query.lang));
+});
+
+// 200 лучших за всё время. ?filter=all|movie|tv&lang=ru|en
+app.get('/api/catalog/top', async (req, res) => {
+  optionalAuth(req);
+  if (!process.env.TMDB_API_KEY) return res.status(503).json({ error: 'TMDB API недоступен' });
+  try {
+    const filter = req.query.filter === 'movie' ? 'movie' : req.query.filter === 'tv' ? 'tv' : 'all';
+    const items = await getCatalogTop200(catalogDeps(req.query.lang), filter, req.query.lang);
+    res.json({ filter, items });
+  } catch (err) {
+    if (RECOMMENDER_DEBUG) console.error('[catalog] top200 failed', err?.message);
+    res.status(500).json({ error: 'Не удалось собрать подборку' });
+  }
+});
+
+// Одна подборка по id (жанр/настроение/спец). ?lang=ru|en
+app.get('/api/catalog/collection/:id', async (req, res) => {
+  optionalAuth(req);
+  if (!process.env.TMDB_API_KEY) return res.status(503).json({ error: 'TMDB API недоступен' });
+  try {
+    const items = await getCatalogCollection(catalogDeps(req.query.lang), req.params.id, req.query.lang);
+    if (items === null) return res.status(404).json({ error: 'Подборка не найдена' });
+    res.json({ id: req.params.id, items });
+  } catch (err) {
+    if (RECOMMENDER_DEBUG) console.error('[catalog] collection failed', req.params.id, err?.message);
+    res.status(500).json({ error: 'Не удалось собрать подборку' });
+  }
 });
 
 /* ===================================================================
@@ -2308,10 +2661,13 @@ app.get('/api/stats', (req, res) => {
     .slice(0, 5)
     .map((m) => ({ title: m.title, watchedAt: m.watchedAt, rating: m.rating }));
 
+  const plannedCount = movies.filter((m) => m.status === 'want').length;
+
   res.json({
     weekCount,
     monthCount,
     totalWatched: watched.length,
+    plannedCount,
     avgRating,
     favoriteGenres,
     monthly: Object.entries(monthly).sort((a, b) => a[0].localeCompare(b[0])),
@@ -2410,8 +2766,9 @@ JSON: {"similar":[{"title":"...","reason":"...","whyDetailed":"..."}]}`
 const RECOMMENDATION_CACHE_TTL_MS = Number(process.env.RECOMMENDATION_CACHE_TTL_MS) || 10 * 60 * 1000;
 const recommendationCache = new Map();
 
-function recommendationCacheKey(username, mediaTypeFilter, categoryFilter) {
-  return `${username}::${mediaTypeFilter || 'all'}::${categoryFilter || 'none'}`;
+function recommendationCacheKey(username, mediaTypeFilter, categoryFilter, lang) {
+  const l = normalizeTmdbLanguage(lang) === 'en-US' ? 'en' : 'ru';
+  return `${username}::${l}::${mediaTypeFilter || 'all'}::${categoryFilter || 'none'}`;
 }
 
 function getCachedRecommendations(key) {
@@ -2454,9 +2811,11 @@ const OPENAI_RECOMMENDATION_EXPLANATIONS =
 const RECOMMENDER_DEBUG = String(process.env.RECOMMENDER_DEBUG || '').toLowerCase() === 'true';
 
 // Тонкая обёртка: прокидывает доступ к TMDB в движок (без циклических импортов).
-function runLocalRecommender({ movies, prefs, mode = 'personal', limit = 10, mediaType = null, excludeTitles = [] }) {
+// language — язык названий/описаний кандидатов из TMDB (справочник жанров —
+// канонический ru, см. makeLocalizedTmdbFetch).
+function runLocalRecommender({ movies, prefs, mode = 'personal', limit = 10, mediaType = null, excludeTitles = [], swipeSession = null, mix = null, language = 'ru' }) {
   return recommendForUser({
-    tmdbFetch,
+    tmdbFetch: makeLocalizedTmdbFetch(language),
     tmdbPosterFromPath,
     movies,
     prefs,
@@ -2464,8 +2823,219 @@ function runLocalRecommender({ movies, prefs, mode = 'personal', limit = 10, med
     limit,
     mediaType,
     excludeTitles,
+    swipeSession,
+    mix,
     debug: RECOMMENDER_DEBUG
   });
+}
+
+// Пропорции смешивания свайп-ленты (можно настроить под архитектуру):
+//   adapted   — под текущие свайпы (similar к свайпам вправо + бусты жанров);
+//   personal  — общий персональный вкус пользователя;
+//   diversity — тренды/новинки/расширение вкуса.
+const SWIPE_FEED_MIX = {
+  adapted: Number(process.env.SWIPE_MIX_ADAPTED) || 0.45,
+  personal: Number(process.env.SWIPE_MIX_PERSONAL) || 0.30,
+  diversity: Number(process.env.SWIPE_MIX_DIVERSITY) || 0.25
+};
+
+// Пропорции для ПУЛА кандидатов (не финальная лента!). Финальную ленту
+// собирает diversifySwipeFeed. Пул намеренно богат корзиной diversity,
+// чтобы у анти-зацикливания всегда был запас фильмов других категорий —
+// даже когда пользователь активно лайкает одну категорию.
+const SWIPE_POOL_MIX = {
+  adapted: 0.4,
+  personal: 0.25,
+  diversity: 0.35
+};
+
+/* ── Анти-зацикливание свайп-ленты ──────────────────────────────────
+   Параметры лимитов «подряд» и «в окне». Идея: лайк категории повышает
+   её частоту, но НЕ превращает всю ленту в одну страну/жанр/аниме.
+   Можно переопределить через переменные окружения. */
+const SWIPE_DIVERSITY = {
+  window: Number(process.env.SWIPE_DIV_WINDOW) || 5,
+  maxSameLangStreak: Number(process.env.SWIPE_DIV_LANG_STREAK) || 2,
+  maxSameLangInWindow: Number(process.env.SWIPE_DIV_LANG_WINDOW) || 3,
+  maxAnimeStreak: Number(process.env.SWIPE_DIV_ANIME_STREAK) || 1,
+  maxAnimeInWindow: Number(process.env.SWIPE_DIV_ANIME_WINDOW) || 2,
+  maxSameGenreStreak: Number(process.env.SWIPE_DIV_GENRE_STREAK) || 2,
+  maxSameGenreInWindow: Number(process.env.SWIPE_DIV_GENRE_WINDOW) || 3,
+  maxAsianStreak: Number(process.env.SWIPE_DIV_ASIAN_STREAK) || 2,
+  maxAsianInWindow: Number(process.env.SWIPE_DIV_ASIAN_WINDOW) || 3,
+  maxAdaptedShare: Number(process.env.SWIPE_DIV_ADAPTED_SHARE) || 0.5,
+  maxAsianShare: Number(process.env.SWIPE_DIV_ASIAN_SHARE) || 0.55,
+  exploreEvery: Number(process.env.SWIPE_DIV_EXPLORE_EVERY) || 4
+};
+
+const ASIAN_LANGS = new Set(['ko', 'ja', 'zh', 'th', 'vi', 'id', 'hi']);
+
+function recLang(r) {
+  return String(r.originalLanguage || '').toLowerCase() || null;
+}
+function recPrimaryGenre(r) {
+  const g = (r.genres || [])[0];
+  return g ? String(g).toLowerCase().replace(/ё/g, 'е') : null;
+}
+function recIsAnime(r) {
+  const lang = recLang(r);
+  const genres = (r.genres || []).map((g) => String(g).toLowerCase());
+  const animated = genres.some((g) => /мульт|анимац|animation/.test(g));
+  return animated && lang === 'ja';
+}
+function recIsAsian(r) {
+  const l = recLang(r);
+  return !!l && ASIAN_LANGS.has(l);
+}
+
+/**
+ * diversifySwipeFeed — собирает финальную свайп-ленту из отсортированного по
+ * релевантности пула, НЕ допуская зацикливания на одной категории.
+ *
+ * Жадно ставит самый релевантный доступный фильм, который не нарушает
+ * лимиты: подряд одной страны/языка, подряд аниме, подряд одного жанра,
+ * «азиатских подряд», а также долю адаптированных карточек (≤ ~50%).
+ * Каждый exploreEvery-й слот специально предпочитает карточку НЕ из текущей
+ * любимой категории (exploration). Если допустимых нет — поэтапно ослабляет
+ * ограничения, чтобы лента всегда заполнялась.
+ */
+function diversifySwipeFeed(recs, limit, cfg = SWIPE_DIVERSITY) {
+  const pool = recs.slice();
+  const out = [];
+  let adaptedCount = 0;
+  let asianCount = 0;
+  const adaptedCap = Math.ceil(limit * cfg.maxAdaptedShare);
+  const asianCap = Math.ceil(limit * cfg.maxAsianShare);
+
+  const tailStreak = (pred) => {
+    let n = 0;
+    for (let i = out.length - 1; i >= 0; i -= 1) {
+      if (pred(out[i])) n += 1; else break;
+    }
+    return n;
+  };
+  const windowCount = (pred) => {
+    const win = out.slice(Math.max(0, out.length - cfg.window));
+    return win.filter(pred).length;
+  };
+
+  const violates = (r, relax) => {
+    const lang = recLang(r);
+    const genre = recPrimaryGenre(r);
+    const anime = recIsAnime(r);
+    const asian = recIsAsian(r);
+
+    if (!relax.streak) {
+      if (anime && tailStreak(recIsAnime) >= cfg.maxAnimeStreak) return true;
+      if (lang && tailStreak((x) => recLang(x) === lang) >= cfg.maxSameLangStreak) return true;
+      if (genre && tailStreak((x) => recPrimaryGenre(x) === genre) >= cfg.maxSameGenreStreak) return true;
+      if (asian && tailStreak(recIsAsian) >= cfg.maxAsianStreak) return true;
+    }
+    if (!relax.window) {
+      if (anime && windowCount(recIsAnime) >= cfg.maxAnimeInWindow) return true;
+      if (lang && windowCount((x) => recLang(x) === lang) >= cfg.maxSameLangInWindow) return true;
+      if (genre && windowCount((x) => recPrimaryGenre(x) === genre) >= cfg.maxSameGenreInWindow) return true;
+      if (asian && windowCount(recIsAsian) >= cfg.maxAsianInWindow) return true;
+    }
+    if (!relax.adapted && r.swipeAdapted && (adaptedCount + 1) > adaptedCap) return true;
+    // Глобальная доля «азиатского» контента ограничена, чтобы лайки
+    // корейского/аниме делали ленту чуть более азиатской, но не сплошь.
+    if (!relax.adapted && asian && (asianCount + 1) > asianCap) return true;
+    return false;
+  };
+
+  const findIndex = (relax, preferExplore) => {
+    if (preferExplore) {
+      for (let i = 0; i < pool.length; i += 1) {
+        if (!pool[i].swipeAdapted && !violates(pool[i], relax)) return i;
+      }
+    }
+    for (let i = 0; i < pool.length; i += 1) {
+      if (!violates(pool[i], relax)) return i;
+    }
+    return -1;
+  };
+
+  const total = Math.min(limit, recs.length);
+  while (out.length < total && pool.length) {
+    const wantExplore = out.length > 0 && (out.length % cfg.exploreEvery === cfg.exploreEvery - 1);
+    let idx = findIndex({}, wantExplore);
+    if (idx === -1) idx = findIndex({ window: true }, wantExplore);
+    if (idx === -1) idx = findIndex({ window: true, streak: true }, false);
+    if (idx === -1) idx = findIndex({ window: true, streak: true, adapted: true }, false);
+    if (idx === -1) idx = 0;
+    const chosen = pool.splice(idx, 1)[0];
+    if (chosen.swipeAdapted) adaptedCount += 1;
+    if (recIsAsian(chosen)) asianCount += 1;
+    out.push(chosen);
+  }
+  return out;
+}
+
+// Гибридный скоринг сортирует строго по score и может «сбить» в кучу все
+// адаптированные карточки. Чтобы сохранить разнообразие ленты, после гибрида
+// заново чередуем корзины (adapted приоритетнее, но не сплошняком).
+function interleaveSwipeFeed(recs, limit) {
+  const groups = { adapted: [], personal: [], diversity: [] };
+  for (const r of recs) {
+    const b = r.swipeAdapted ? 'adapted' : (r.bucket || 'personal');
+    (groups[b] || groups.personal).push(r);
+  }
+  const pattern = ['adapted', 'adapted', 'personal', 'diversity'];
+  const out = [];
+  let p = 0;
+  const total = Math.min(limit, recs.length);
+  while (out.length < total) {
+    let placed = false;
+    for (let tries = 0; tries < pattern.length; tries += 1) {
+      const name = pattern[(p + tries) % pattern.length];
+      if (groups[name].length) {
+        out.push(groups[name].shift());
+        placed = true;
+        p = (p + tries + 1) % pattern.length;
+        break;
+      }
+    }
+    if (!placed) break;
+  }
+  // Хвост (если что-то осталось из-за пустых корзин).
+  if (out.length < total) {
+    for (const name of ['adapted', 'personal', 'diversity']) {
+      for (const r of groups[name]) { if (out.length >= total) break; out.push(r); }
+    }
+  }
+  return out;
+}
+
+// Нормализуем «сырые» сигналы свайпов с фронтенда в безопасную структуру.
+function parseSwipeSession(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const clampList = (arr) => (Array.isArray(arr) ? arr : [])
+    .filter((m) => m && (m.tmdbId || m.title))
+    .slice(-12)
+    .map((m) => ({
+      tmdbId: Number(m.tmdbId) || null,
+      mediaType: m.mediaType === 'tv' ? 'tv' : 'movie',
+      title: typeof m.title === 'string' ? m.title.slice(0, 200) : '',
+      genres: Array.isArray(m.genres) ? m.genres.slice(0, 8).map((g) => String(g)) : []
+    }));
+  const right = clampList(raw.right);
+  const left = clampList(raw.left);
+  if (!right.length && !left.length) return null;
+  const cleanMap = (obj) => {
+    const out = {};
+    for (const [k, v] of Object.entries(obj || {})) {
+      const n = Number(v);
+      if (Number.isFinite(n) && k) out[String(k)] = n;
+    }
+    return out;
+  };
+  return {
+    right,
+    left,
+    boostGenres: cleanMap(raw.boostGenres),
+    penalizeGenres: cleanMap(raw.penalizeGenres)
+  };
 }
 
 // Короткое summary вкуса для опционального AI-слоя (НЕ вся история).
@@ -2677,20 +3247,24 @@ app.get('/api/recommendations', async (req, res) => {
     const blacklistPrompt = buildBlacklistPrompt(prefs.blacklist);
     const psychPrompt = appendPsychSignals(prefs);
     const limit = normalizeRecommendationLimit(req.query.limit);
+    const lang = req.query.lang;
     const excludeTitles = parseExcludedTitles(req.query.excludeTitles);
     const mediaTypeFilter = req.query.mediaType === 'tv' ? 'tv' : req.query.mediaType === 'movie' ? 'movie' : null;
     const categoryFilter = req.query.category === 'animation' ? 'animation' : null;
     const enrichOpts = { limit, excludeTitles, mediaType: mediaTypeFilter, category: categoryFilter };
     const aiForced = req.query.ai === '1';
+    // Ручное «Обновить» в свайпах присылает nocache=1 — обходим кеш, чтобы
+    // вернуть свежую подборку, а не тот же набор карточек.
+    const noCache = req.query.nocache === '1' || aiForced;
 
     // ── ЛОКАЛЬНЫЙ ДВИЖОК (local-first) ────────────────────────────
     // По умолчанию рекомендации собирает быстрый локальный алгоритм из
     // реальных TMDB-кандидатов. OpenAI подключается только опционально
     // (rerank/объяснения) и не является основным генератором.
     if (RECOMMENDER_MODE !== 'ai_first') {
-      const localKey = recommendationCacheKey(username, mediaTypeFilter, categoryFilter);
+      const localKey = recommendationCacheKey(username, mediaTypeFilter, categoryFilter, lang);
       const cachedLocal = getCachedRecommendations(localKey);
-      if (cachedLocal && !aiForced) {
+      if (cachedLocal && !noCache) {
         const finalized = filterSwipeRecommendations(
           filterFreshRecommendations(cachedLocal, movies, excludeTitles).slice(0, limit),
           enrichOpts
@@ -2705,7 +3279,7 @@ app.get('/api/recommendations', async (req, res) => {
         const local = await runLocalRecommender({
           movies, prefs, mode: 'personal',
           limit: Math.max(limit + 6, 16),
-          mediaType: engineMediaType, excludeTitles
+          mediaType: engineMediaType, excludeTitles, language: lang
         });
         let recs = filterSwipeRecommendations(local.recommendations, enrichOpts);
 
@@ -2756,7 +3330,7 @@ app.get('/api/recommendations', async (req, res) => {
       });
     }
 
-    const cacheKey = recommendationCacheKey(username, mediaTypeFilter, categoryFilter);
+    const cacheKey = recommendationCacheKey(username, mediaTypeFilter, categoryFilter, lang);
     const cached = getCachedRecommendations(cacheKey);
     if (cached) {
       const freshCached = filterFreshRecommendations(cached, movies, excludeTitles);
@@ -2803,7 +3377,7 @@ JSON: {"recommendations":[{"title":"...","mediaType":"movie","reason":"...","why
       movies,
       { ...enrichOpts, limit: requestCount }
     );
-    setCachedRecommendations(recommendationCacheKey(username, mediaTypeFilter, categoryFilter), enrichedAll);
+    setCachedRecommendations(recommendationCacheKey(username, mediaTypeFilter, categoryFilter, lang), enrichedAll);
     res.json({ recommendations: enrichedAll.slice(0, limit) });
   } catch (error) {
     const formatted = error.openai || formatOpenAIError(error.message);
@@ -2822,6 +3396,79 @@ JSON: {"recommendations":[{"title":"...","mediaType":"movie","reason":"...","why
       // Preserve the original AI error if the local fallback also fails.
     }
     res.status(formatted.code === 'quota' ? 503 : 500).json({ error: formatted.message });
+  }
+});
+
+/* ===================================================================
+   СВАЙП-ЛЕНТА С СЕССИОННОЙ АДАПТАЦИЕЙ
+   -------------------------------------------------------------------
+   Отдельный POST-эндпоинт для ленты свайпов: принимает временный профиль
+   вкуса текущей сессии (свайпы вправо/влево) и адаптирует выдачу прямо
+   во время сессии. Свайп вправо → через 2–3 карточки начинают попадаться
+   похожие фильмы; свайп влево → похожие понижаются. Лента смешивается по
+   корзинам (adapted/personal/diversity), чтобы не схлопнуться в один жанр.
+
+   Учитывает все данные пользователя (просмотренное, оценки, список,
+   победителей битв, психо/визуальные тесты, blacklist, фидбэк) через тот
+   же локальный движок + гибридный слой (похожие пользователи).
+   =================================================================== */
+app.post('/api/discover/feed', async (req, res) => {
+  const authedUser = optionalAuth(req);
+  const username = authedUser || '__guest__';
+
+  try {
+    const { movies } = authedUser ? loadUserMovies(authedUser) : { movies: [] };
+    const prefs = authedUser ? loadUserPrefs(DATA_DIR, authedUser) : loadUserPrefs(DATA_DIR, '__guest__');
+
+    const limit = normalizeRecommendationLimit(req.body?.limit);
+    const excludeTitles = parseExcludedTitles(
+      Array.isArray(req.body?.excludeTitles) ? req.body.excludeTitles.join(',') : req.body?.excludeTitles
+    );
+    const mediaTypeFilter = req.body?.mediaType === 'tv' ? 'tv' : req.body?.mediaType === 'movie' ? 'movie' : null;
+    const categoryFilter = req.body?.category === 'animation' ? 'animation' : null;
+    const enrichOpts = { limit, excludeTitles, mediaType: mediaTypeFilter, category: categoryFilter };
+    const swipeSession = parseSwipeSession(req.body?.session);
+    const lang = req.body?.lang || req.query.lang;
+
+    const engineMediaType = categoryFilter === 'animation' ? 'tv' : mediaTypeFilter;
+    // Просим у движка заметно больше кандидатов, чем нужно: анти-зацикливание
+    // (diversifySwipeFeed) должно иметь запас, чтобы подменять однообразные
+    // карточки на фильмы из других стран/жанров/категорий. Пул специально
+    // обогащаем корзиной diversity (SWIPE_POOL_MIX), иначе при сильном
+    // перекосе в лайках весь пул схлопывается в одну категорию.
+    const poolLimit = Math.max(limit * 4, 48);
+    const local = await runLocalRecommender({
+      movies, prefs, mode: 'personal',
+      limit: poolLimit,
+      mediaType: engineMediaType,
+      excludeTitles,
+      swipeSession,
+      mix: swipeSession ? SWIPE_POOL_MIX : null,
+      language: lang
+    });
+
+    let recs = filterSwipeRecommendations(local.recommendations, enrichOpts);
+
+    // Гибрид: усиливаем выдачу мнением похожих пользователей + популярностью.
+    const hybrid = applyHybridScoring({ username, recs, movies, prefs, limit: poolLimit });
+    recs = hybrid.recommendations;
+
+    // Анти-зацикливание: из отсортированного пула собираем разнообразную
+    // ленту с лимитами «подряд» по стране/жанру/аниме и exploration-вставками.
+    // (Заменяет простое чередование по корзинам — оно не учитывало страну/аниме.)
+    if (swipeSession) recs = diversifySwipeFeed(recs, Math.max(limit + 4, 16));
+
+    return res.json({
+      recommendations: recs.slice(0, limit),
+      source: 'swipe_feed',
+      adapted: !!swipeSession,
+      mix: swipeSession ? SWIPE_FEED_MIX : null,
+      similarUsers: hybrid.similarUsersCount,
+      stats: RECOMMENDER_DEBUG ? local.stats : undefined
+    });
+  } catch (error) {
+    if (RECOMMENDER_DEBUG) console.error('[swipe-feed] failed', error?.message);
+    return res.status(500).json({ error: 'Не удалось собрать ленту свайпов' });
   }
 });
 
@@ -4027,13 +4674,21 @@ app.post('/api/watch-now', async (req, res) => {
   };
   const pickCounts = buildWatchNowPromptCounts(rankedCandidates.length, WATCH_NOW_LIMIT);
 
-  if (!apiKey) {
-    let picks = finalizeWatchNowPicks(fromList, movies, prefs, mergeOptions);
-    picks = await ensureWatchNowFilled(picks, movies, prefs, {
-      ...mergeOptions,
-      blacklist: userPrefs.blacklist
-    });
-    return res.json({ picks, mode: 'local', complete: isWatchNowComplete(picks) });
+  const isRefresh = mergeOptions.excludeTitles.length > 0;
+
+  // ── LOCAL-FIRST ─────────────────────────────────────────────────
+  // По умолчанию подбор делает быстрый локальный алгоритм (список + TMDB),
+  // без обращения к OpenAI. AI подключаем только если локально не удалось
+  // собрать 5 вариантов либо пользователь нажал «Обновить» (excludeTitles).
+  let localPicks = finalizeWatchNowPicks(fromList, movies, prefs, mergeOptions);
+  localPicks = await ensureWatchNowFilled(localPicks, movies, prefs, {
+    ...mergeOptions,
+    blacklist: userPrefs.blacklist
+  });
+  const localComplete = isWatchNowComplete(localPicks);
+
+  if (!apiKey || (!isRefresh && localComplete)) {
+    return res.json({ picks: localPicks, mode: 'local', complete: localComplete });
   }
 
   const taste = buildTasteContext(movies, userPrefs.blacklist);
@@ -4112,15 +4767,10 @@ JSON: {"picks":[{"title":"...","runtime":85,"reason":"...","whyDetailed":"...","
     res.json({ picks, mode: 'openai', complete: isWatchNowComplete(picks) });
   } catch (error) {
     const formatted = error.openai || formatOpenAIError(error.message);
-    let picks = finalizeWatchNowPicks(fromList, movies, prefs, mergeOptions);
-    picks = await ensureWatchNowFilled(picks, movies, prefs, {
-      ...mergeOptions,
-      blacklist: userPrefs.blacklist
-    });
     res.json({
-      picks,
+      picks: localPicks,
       mode: 'local',
-      complete: isWatchNowComplete(picks),
+      complete: localComplete,
       notice: formatted.message
     });
   }
@@ -4283,6 +4933,136 @@ app.post('/api/premiere/remind', (req, res) => {
 
   saveUserPrefs(DATA_DIR, username, prefs);
   res.json({ success: true, reminders: prefs.premiereReminders });
+});
+
+/* ===================================================================
+   Полная страница человека (актёр / режиссёр / сценарист и др.).
+   Публичный эндпоинт (доступен и гостям). Основной источник — TMDB:
+   детали, фильмография (combined_credits), фото (images). Рост и часть
+   данных аккуратно дополняем из HDRezka (best-effort, не блокирует).
+   =================================================================== */
+const personCache = new Map(); // ключ: `${id}:${lang}` → данные TMDB (TTL общий)
+
+function tmdbProfileUrl(path, size = 'h632') {
+  if (!path) return null;
+  const p = String(path).startsWith('/') ? path : `/${path}`;
+  return `https://image.tmdb.org/t/p/${size}${p}`;
+}
+
+// Главный департамент → ключ роли для перевода на фронте.
+function knownForKey(dep) {
+  switch (dep) {
+    case 'Directing': return 'roleDirector';
+    case 'Writing': return 'roleWriter';
+    case 'Production': return 'roleProducer';
+    case 'Acting': return 'roleActor';
+    default: return 'roleCrew';
+  }
+}
+
+// Собираем единый список фильмов/сериалов человека из combined_credits.
+function buildFilmography(credits) {
+  const map = new Map(); // dedupe по `${media}:${id}`, копим роли
+  const consume = (item, role) => {
+    if (!item || !item.id) return;
+    const media = item.media_type === 'tv' ? 'tv' : 'movie';
+    const key = `${media}:${item.id}`;
+    const date = item.release_date || item.first_air_date || '';
+    const existing = map.get(key);
+    if (existing) {
+      if (role && existing.roles.indexOf(role) === -1) existing.roles.push(role);
+      return;
+    }
+    map.set(key, {
+      id: item.id,
+      mediaType: media,
+      title: item.title || item.name || '',
+      year: date ? date.slice(0, 4) : null,
+      poster: tmdbPosterFromPath(item.poster_path, 'w342'),
+      voteAverage: item.vote_average || null,
+      popularity: item.popularity || 0,
+      roles: role ? [role] : []
+    });
+  };
+
+  (credits?.cast || []).forEach((c) => consume(c, c.character || null));
+  (credits?.crew || []).forEach((c) => consume(c, c.job || null));
+
+  const list = Array.from(map.values());
+  // Сортировка: сначала по году (новые выше), затем по популярности.
+  list.sort((a, b) => {
+    const ay = Number(a.year) || 0;
+    const by = Number(b.year) || 0;
+    if (by !== ay) return by - ay;
+    return (b.popularity || 0) - (a.popularity || 0);
+  });
+  return list.map((m) => ({ ...m, role: m.roles.filter(Boolean).slice(0, 2).join(', ') || null, roles: undefined }));
+}
+
+async function loadPersonDetails(personId, language = 'ru-RU') {
+  const lang = normalizeTmdbLanguage(language);
+  const cacheKey = `${personId}:${lang}`;
+  const cached = cacheGet(personCache, cacheKey);
+  if (cached) return cached;
+
+  const person = await tmdbFetch(`/person/${personId}`, {
+    append_to_response: 'combined_credits,images,external_ids'
+  }, { language: lang });
+  if (!person) return null;
+
+  // Fallback биографии: если на выбранном языке её нет — берём английскую.
+  let biography = person.biography || '';
+  if (!biography && lang !== 'en-US') {
+    const enPerson = await tmdbFetch(`/person/${personId}`, {}, { language: 'en-US' });
+    biography = enPerson?.biography || '';
+  }
+
+  const filmography = buildFilmography(person.combined_credits);
+  const knownDepartment = person.known_for_department || null;
+
+  const data = {
+    id: person.id,
+    // В EN-режиме кириллическое имя (русские актёры) → латиница; оригинальное
+    // имя (also_known_as) остаётся как есть — это и есть «оригинал».
+    name: localizePersonName(person.name || '', lang),
+    originalName: person.also_known_as?.[0] || null,
+    photo: tmdbProfileUrl(person.profile_path, 'h632'),
+    biography,
+    birthday: person.birthday || null,
+    deathday: person.deathday || null,
+    placeOfBirth: person.place_of_birth || null,
+    height: null,
+    knownForDepartment: knownDepartment,
+    knownForKey: knownForKey(knownDepartment),
+    gender: person.gender || null,
+    filmography
+  };
+
+  cacheSet(personCache, cacheKey, data);
+  return data;
+}
+
+app.get('/api/person/:personId/full', async (req, res) => {
+  optionalAuth(req);
+  const data = await loadPersonDetails(req.params.personId, req.query.lang);
+  if (!data) return res.status(503).json({ error: 'TMDB API недоступен' });
+
+  // HDRezka — необязательное обогащение (рост / место рождения).
+  // Ограничиваем время, чтобы не задерживать ответ.
+  if (!data.height || !data.placeOfBirth) {
+    try {
+      const extra = await Promise.race([
+        fetchHdrezkaPersonInfo(data.originalName || data.name),
+        new Promise((resolve) => setTimeout(() => resolve(null), 2500))
+      ]);
+      if (extra) {
+        if (!data.height && extra.height) data.height = extra.height;
+        if (!data.placeOfBirth && extra.placeOfBirth) data.placeOfBirth = extra.placeOfBirth;
+      }
+    } catch { /* обогащение необязательно */ }
+  }
+
+  res.json(data);
 });
 
 app.get('/api/person/:personId', async (req, res) => {

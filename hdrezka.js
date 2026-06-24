@@ -2,11 +2,11 @@ import { titleSimilarity } from './tmdbMatch.js';
 
 
 
-const HDREZKA_BASE = (process.env.HDREZKA_BASE || 'https://hdrezka.name').replace(/\/$/, '');
+export const HDREZKA_BASE = (process.env.HDREZKA_BASE || 'https://hdrezka.name').replace(/\/$/, '');
 
 
 
-const DEFAULT_HEADERS = {
+export const DEFAULT_HEADERS = {
 
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 
@@ -167,7 +167,7 @@ function parseSearchRowMeta(row) {
 
 const HDREZKA_TIMEOUT_MS = Number(process.env.HDREZKA_TIMEOUT_MS) || 3500;
 
-async function fetchHdrezkaHtml(pathOrUrl, options = {}) {
+export async function fetchHdrezkaHtml(pathOrUrl, options = {}) {
 
   const url = pathOrUrl.startsWith('http')
 
@@ -631,6 +631,26 @@ function buildHdrezkaResult(picked, ratings = null) {
 
 
 
+// Проверяем, что найденный на HDRezka результат — действительно тот фильм:
+// сравниваем названия (с учётом оригинального) и год. Если совпадение слабое
+// или год расходится больше чем на год — считаем, что фильма на сайте нет.
+function isConfidentHdrezkaMatch({ title, originalTitle, matchedTitle, year }, picked) {
+  if (!picked) return false;
+  const parsed = parseHdrezkaDisplayTitle(picked.title || '');
+  const refs = [originalTitle, matchedTitle, title].filter(Boolean);
+  const cands = [picked.title, parsed.title, parsed.altTitle, picked.originalTitle].filter(Boolean);
+  if (!refs.length || !cands.length) return false;
+
+  let sim = 0;
+  for (const r of refs) {
+    for (const c of cands) sim = Math.max(sim, titleSimilarity(r, c));
+  }
+  if (sim < 0.6) return false;
+
+  if (year && picked.year && Math.abs(Number(picked.year) - Number(year)) > 1) return false;
+  return true;
+}
+
 export async function resolveHdrezkaMovie({ title, year, matchedTitle, originalTitle }) {
 
   const queries = [...new Set([originalTitle, title, matchedTitle].filter(Boolean))];
@@ -671,9 +691,11 @@ export async function resolveHdrezkaMovie({ title, year, matchedTitle, originalT
 
 
 
+    const confident = isConfidentHdrezkaMatch({ title, originalTitle, matchedTitle, year }, picked);
+
     const ratings = await fetchPageRatings(picked.url);
 
-    return buildHdrezkaResult(picked, ratings);
+    return { ...buildHdrezkaResult(picked, ratings), confident };
 
   } catch {
 
@@ -684,6 +706,57 @@ export async function resolveHdrezkaMovie({ title, year, matchedTitle, originalT
 }
 
 
+
+/* ===================================================================
+   Дополнительное обогащение страницы человека данными HDRezka.
+   Источник вспомогательный (TMDB — основной). Возвращаем только то, чего
+   обычно нет в TMDB: рост, иногда место рождения. Всё «best-effort»:
+   любая ошибка/таймаут → null, страница человека не ломается.
+   =================================================================== */
+function stripTags(html) {
+  return decodeHtml(String(html || '').replace(/<[^>]+>/g, ' '));
+}
+
+export async function fetchHdrezkaPersonInfo(name) {
+  if (!name) return null;
+  try {
+    // 1) Ищем человека через расширенный поиск (там бывает блок «Актёры»).
+    const searchHtml = await fetchHdrezkaHtml(
+      `/search/?do=search&subaction=search&q=${encodeURIComponent(name)}`,
+      { headers: { 'X-Requested-With': undefined } }
+    );
+    if (!searchHtml) return null;
+
+    const personUrl = (searchHtml.match(/href="([^"]*\/person\/[^"]+)"/i) || [])[1];
+    if (!personUrl) return null;
+
+    // 2) Открываем страницу персоны и аккуратно вытаскиваем поля.
+    const html = await fetchHdrezkaHtml(absolutizeUrl(personUrl), {
+      headers: { 'X-Requested-With': undefined }
+    });
+    if (!html) return null;
+
+    const info = {};
+
+    // Рост: «Рост: 1.85 м» или «Рост 185 см».
+    const heightMatch = stripTags(html).match(/Рост[:\s]*([\d]+(?:[.,]\d+)?)\s*(см|м)\b/i);
+    if (heightMatch) {
+      info.height = `${heightMatch[1].replace(',', '.')} ${heightMatch[2]}`;
+    }
+
+    // Место рождения (если в TMDB пусто).
+    const placeMatch = html.match(/Место рождения[\s\S]{0,260}?<(?:a|span|div|td)[^>]*>([^<]{2,120})</i);
+    if (placeMatch) {
+      const place = decodeHtml(placeMatch[1]);
+      if (place && !/место рождения/i.test(place)) info.placeOfBirth = place;
+    }
+
+    info.url = absolutizeUrl(personUrl);
+    return (info.height || info.placeOfBirth) ? info : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function fetchHdrezkaRatings({ title, year, matchedTitle, originalTitle }) {
 
@@ -707,7 +780,9 @@ export async function fetchHdrezkaRatings({ title, year, matchedTitle, originalT
 
     kinopoisk: result.kinopoisk,
 
-    hdrezkaUrl: result.hdrezkaUrl
+    hdrezkaUrl: result.hdrezkaUrl,
+
+    hdrezkaConfident: result.confident === true
 
   };
 

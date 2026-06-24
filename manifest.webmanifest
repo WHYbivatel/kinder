@@ -7,7 +7,7 @@
   "scope": "/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
-  "orientation": "portrait",
+  "orientation": "portrait-primary",
   "background_color": "#08080a",
   "theme_color": "#08080a",
   "categories": ["entertainment", "lifestyle"],

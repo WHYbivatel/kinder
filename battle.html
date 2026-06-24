@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#08080a">
   <meta name="mobile-web-app-capable" content="yes">
@@ -19,40 +19,41 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="appShell.css">
+  <link rel="stylesheet" href="mobile.css">
   <script src="theme.js"></script>
+  <script src="i18n.js"></script>
+  <script src="mobileShell.js"></script>
 </head>
 <body data-page="battle">
 
   <div id="login-overlay" class="login-overlay">
     <div class="login-card">
+      <button type="button" id="login-close" class="login-close" aria-label="Закрыть">✕</button>
       <h1>Мой список фильмов</h1>
+      <p id="login-intro" class="login-intro">Войдите по номеру телефона, чтобы устроить битву из своих фильмов.</p>
       <p id="open-via-server-hint" class="server-hint hidden"></p>
-      <div id="login-box">
-        <h2>Вход</h2>
-        <form id="login-form">
-          <input type="text" id="login-username" placeholder="Логин" required autocomplete="username">
-          <input type="password" id="login-password" placeholder="Пароль" required autocomplete="current-password">
-          <button type="submit">Войти</button>
-        </form>
-        <p id="login-error" class="auth-error"></p>
-        <p class="auth-switch">Нет аккаунта? <button type="button" id="show-register">Зарегистрироваться</button></p>
-      </div>
-      <div id="register-box" class="hidden">
-        <h2>Регистрация</h2>
-        <form id="register-form">
-          <input type="text" id="register-username" placeholder="Логин (мин. 3 символа)" required>
-          <input type="password" id="register-password" placeholder="Пароль (мин. 4 символа)" required>
-          <button type="submit">Создать аккаунт</button>
-        </form>
-        <p id="register-error" class="auth-error"></p>
-        <p class="auth-switch">Уже есть аккаунт? <button type="button" id="show-login">Войти</button></p>
-      </div>
+      <form id="auth-phone-form" class="auth-form">
+        <input type="tel" id="auth-phone" placeholder="Номер телефона" required autocomplete="tel" inputmode="tel">
+        <button type="submit">Получить код</button>
+      </form>
+      <form id="auth-code-form" class="auth-form hidden">
+        <input type="text" id="auth-code" placeholder="Код из SMS" required autocomplete="one-time-code" inputmode="numeric" maxlength="6">
+        <button type="submit">Войти</button>
+      </form>
+      <p id="auth-error" class="auth-error"></p>
+      <p id="auth-code-hint" class="auth-hint hidden">Отправили код на <span id="auth-phone-display"></span>. <button type="button" id="auth-code-back" class="psych-inline-login">Изменить номер</button></p>
+      <p id="auth-hint-default" class="auth-hint">Без пароля. Войдём по коду из SMS. Новый номер — аккаунт создаётся автоматически.</p>
+      <button type="button" id="auth-guest-btn" class="auth-guest-btn">На главную</button>
     </div>
   </div>
 
   <div id="app-content" class="hidden">
     <header class="app-header">
       <div class="header-inner">
+        <button type="button" id="page-back" class="header-back" aria-label="Назад">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+          <span>Назад</span>
+        </button>
         <a href="/" class="header-brand header-brand-link">
           <span class="site-logo" aria-hidden="true">🎬</span>
           <div class="header-brand-text">
@@ -73,9 +74,49 @@
 
     <main class="page-content page-content--battle">
       <section id="battle-section" class="battle-home-section content-section battle-page-section">
-        <h2 class="section-heading">Битва фильмов</h2>
-        <p class="battle-home-desc">Выбирайте лучший фильм или сериал из пары — мы соберём ваш личный топ из того, что вы уже посмотрели.</p>
-        <button type="button" id="battle-start-btn" class="battle-start-btn">Начать битву</button>
+        <div class="battle-hero">
+          <span class="battle-hero-glow" aria-hidden="true"></span>
+          <span class="battle-hero-badge" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/><line x1="19" y1="21" x2="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" y1="14" x2="9" y2="18"/><line x1="7" y1="17" x2="4" y2="20"/><line x1="3" y1="19" x2="5" y2="21"/></svg>
+          </span>
+          <h2 class="section-heading battle-hero-title">Битва фильмов</h2>
+          <p class="battle-home-desc">Выбирайте лучший фильм или сериал из пары — мы соберём ваш личный топ из того, что вы уже посмотрели.</p>
+          <button type="button" id="battle-start-btn" class="battle-start-btn">
+            <svg class="battle-start-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+            <span>Начать битву</span>
+          </button>
+        </div>
+
+        <div class="battle-modes-preview">
+          <button type="button" class="battle-preview-card battle-preview-card--quick" data-open-battle aria-label="Быстрая битва">
+            <span class="battle-preview-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </span>
+            <span class="battle-preview-text">
+              <span class="battle-preview-name">Быстрая битва</span>
+              <span class="battle-preview-desc">8 фильмов, 7 выборов — мгновенный топ-3.</span>
+            </span>
+          </button>
+          <button type="button" class="battle-preview-card battle-preview-card--full" data-open-battle aria-label="Полная битва">
+            <span class="battle-preview-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+            </span>
+            <span class="battle-preview-text">
+              <span class="battle-preview-name">Полная битва</span>
+              <span class="battle-preview-desc">Точный рейтинг по всем просмотренным.</span>
+            </span>
+          </button>
+          <button type="button" class="battle-preview-card battle-preview-card--genre" data-open-battle aria-label="Битва по жанру">
+            <span class="battle-preview-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>
+            </span>
+            <span class="battle-preview-text">
+              <span class="battle-preview-name">Битва по жанру</span>
+              <span class="battle-preview-desc">Лучший фильм или сериал в жанре.</span>
+            </span>
+          </button>
+        </div>
+
         <div id="battle-my-top" class="battle-home-top hidden"></div>
       </section>
     </main>
@@ -83,6 +124,7 @@
 
   <script src="display.js"></script>
   <script src="battleLogic.js"></script>
+  <script src="guestStore.js"></script>
   <script src="script.js"></script>
   <script src="battle.js"></script>
   <script src="headerNav.js"></script>

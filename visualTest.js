@@ -1,4 +1,5 @@
 (function initVisualTest() {
+  const VISUAL_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
   const SCALE_LABELS = {
     atmosphere: 'Атмосферность',
     emotionality: 'Эмоциональность',
@@ -158,31 +159,34 @@
     const block = document.getElementById('visual-test-section');
     if (!block) return;
 
+    const T = (k, f, v) => (window.t ? window.t(k, v) : f);
     const hasResult = Boolean(state.visualTest?.profileTitle);
     if (!hasResult) {
       block.innerHTML = `
         <div class="visual-home-card">
+          <div class="test-icon">${VISUAL_ICON}</div>
           <div class="visual-home-text">
-            <h2 class="section-heading">Визуальный тест восприятия</h2>
-            <p class="panel-hint">Посмотрите на 8 изображений, выберите, что вы в них видите, а AI подберёт фильмы и сериалы под ваш визуальный стиль.</p>
+            <h2 class="section-heading">${escapeHtml(T('test.visualTitle', 'Визуальный тест восприятия'))}</h2>
+            <p class="panel-hint">${escapeHtml(T('test.visualDesc', 'Посмотрите на 8 изображений, выберите, что вы в них видите, а AI подберёт фильмы и сериалы под ваш визуальный стиль.'))}</p>
           </div>
           <div class="visual-home-actions">
-            <button type="button" class="btn-primary visual-home-btn" id="visual-start-btn">Пройти визуальный тест</button>
+            <button type="button" class="btn-primary visual-home-btn" id="visual-start-btn">${escapeHtml(T('test.visualStart', 'Пройти визуальный тест'))}</button>
           </div>
         </div>`;
     } else {
       const date = formatDate(state.visualTest.completedAt);
       block.innerHTML = `
         <div class="visual-home-card visual-home-card--done">
+          <div class="test-icon">${VISUAL_ICON}</div>
           <div class="visual-home-text">
-            <h2 class="section-heading">Визуальный тест восприятия</h2>
-            <p class="visual-home-date">Последний тест: ${escapeHtml(date)}</p>
-            <p class="visual-home-profile"><strong>Ваш визуальный профиль: ${escapeHtml(state.visualTest.profileTitle)}</strong></p>
+            <h2 class="section-heading">${escapeHtml(T('test.visualTitle', 'Визуальный тест восприятия'))}</h2>
+            <p class="visual-home-date">${escapeHtml(T('test.lastTest', `Последний тест: ${date}`, { date }))}</p>
+            <p class="visual-home-profile"><strong>${escapeHtml(T('test.yourVisualProfile', `Ваш визуальный профиль: ${state.visualTest.profileTitle}`, { title: state.visualTest.profileTitle }))}</strong></p>
             <p class="panel-hint">${escapeHtml(state.visualTest.profileShortDescription || state.visualTest.profileDescription || '')}</p>
           </div>
           <div class="visual-home-actions">
-            <button type="button" class="btn-primary" id="visual-recs-home-btn">Рекомендации по визуальному профилю</button>
-            <button type="button" class="visual-home-secondary" id="visual-retake-home-btn">Пройти заново</button>
+            <button type="button" class="btn-primary" id="visual-recs-home-btn">${escapeHtml(T('test.visualRecs', 'Рекомендации по визуальному профилю'))}</button>
+            <button type="button" class="visual-home-secondary" id="visual-retake-home-btn">${escapeHtml(T('test.retake', 'Пройти заново'))}</button>
           </div>
         </div>`;
     }
@@ -313,10 +317,18 @@
     if (state.step === 'result') {
       const r = state.result || state.visualTest;
       if (!r) return;
+      const guestNotice = state.guestResult
+        ? `<p class="psych-guest-notice">⚠ Результат не сохранится. <button type="button" class="psych-inline-login" id="visual-login-link">Войдите</button>, чтобы хранить историю профиля и получать персональные рекомендации.</p>`
+        : '';
+      const saveBtn = state.guestResult
+        ? `<button type="button" class="visual-btn-ghost" id="visual-login-save-btn">Войти, чтобы сохранить</button>`
+        : `<button type="button" class="visual-btn-ghost" id="visual-save-btn">Сохранить результат</button>`;
+
       container.innerHTML = `
         <p class="visual-eyebrow">Ваш визуальный профиль</p>
         <h2 id="visual-step-title" class="visual-title">${escapeHtml(r.profileTitle)}</h2>
         <p class="visual-lead">${escapeHtml(r.profileDescription || '')}</p>
+        ${guestNotice}
         <div class="visual-scales">${renderScaleBarsHtml(r.scales)}</div>
         <div class="visual-traits">
           <h3>Что вам может подойти</h3>
@@ -326,7 +338,7 @@
         </div>
         <div class="visual-actions visual-actions--result">
           <button type="button" class="btn-primary" id="visual-get-recs-btn">Получить рекомендации</button>
-          <button type="button" class="visual-btn-ghost" id="visual-save-btn">Сохранить результат</button>
+          ${saveBtn}
           <button type="button" class="visual-btn-ghost" id="visual-retake-btn">Пройти заново</button>
           <button type="button" class="visual-btn-ghost" id="visual-close-result-btn">Закрыть</button>
         </div>
@@ -338,6 +350,9 @@
         loadRecommendations();
       });
       container.querySelector('#visual-save-btn')?.addEventListener('click', () => toast('Результат уже сохранён', 'success'));
+      const visualLogin = () => (window.requireLogin ? window.requireLogin() : (window.location.href = '/'));
+      container.querySelector('#visual-login-link')?.addEventListener('click', visualLogin);
+      container.querySelector('#visual-login-save-btn')?.addEventListener('click', visualLogin);
       container.querySelector('#visual-retake-btn')?.addEventListener('click', startTest);
       container.querySelector('#visual-close-result-btn')?.addEventListener('click', () => {
         closeOverlay(true);
@@ -396,12 +411,17 @@
     }
   }
 
+  function isGuest() {
+    return typeof window.isLoggedIn === 'function' ? !window.isLoggedIn() : false;
+  }
+
   async function submitTest() {
     const answers = state.questions.map((q) => ({
       questionId: q.id,
       answerId: state.answers[q.id],
       customText: state.customTexts[q.id] || ''
     }));
+    state.lastAnswers = answers;
 
     const container = ensureOverlay().querySelector('#visual-step-content');
     if (container) container.innerHTML = '<div class="visual-loading">' + window.LoadingUI.ai('Формируем ваш визуальный профиль...', { panel: true, tag: false }) + '</div>';
@@ -422,12 +442,18 @@
         suits: data.profile?.suits || data.visualTest.suits || []
       };
       state.dirty = false;
+      state.guestResult = data.guest === true || data.saved === false;
+      if (state.guestResult) window.GuestStore?.saveTest?.('visual', answers);
       state.selectedResultId = data.visualTest?.id || null;
-      state.step = state.isRetake ? 'saved-notice' : 'result';
+      state.step = (state.isRetake && !state.guestResult) ? 'saved-notice' : 'result';
       renderStep();
       renderHomeBlock();
       window.refreshProfilePage?.();
-      toast(state.isRetake ? 'Новый результат сохранён' : 'Визуальный профиль сохранён', 'success');
+      if (state.guestResult) {
+        toast('Результат не сохранён — войдите, чтобы хранить историю', 'info');
+      } else {
+        toast(state.isRetake ? 'Новый результат сохранён' : 'Визуальный профиль сохранён', 'success');
+      }
     } catch (err) {
       toast(err.message || 'Ошибка сохранения', 'error');
       state.step = 'question';
@@ -520,6 +546,9 @@
     try {
       const body = { mediaType: getActiveMediaType() };
       if (state.selectedResultId) body.resultId = state.selectedResultId;
+      if (isGuest() && Array.isArray(state.lastAnswers) && state.lastAnswers.length) {
+        body.answers = state.lastAnswers;
+      }
 
       const res = await fetch('/api/visual-test/recommendations', {
         method: 'POST',
@@ -572,6 +601,8 @@
   document.addEventListener('click', () => {
     document.querySelectorAll('.visual-dislike-menu').forEach((m) => m.classList.add('hidden'));
   });
+
+  document.addEventListener('i18n:change', renderHomeBlock);
 
   function openRecommendationsForResult(resultId) {
     state.selectedResultId = resultId || null;

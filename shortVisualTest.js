@@ -1,4 +1,13 @@
 (function initShortVisualTests() {
+  const TEST_ICONS = {
+    movie_genre_visual_test: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polygon points="16 8 11 11 8 16 13 13 16 8"/></svg>',
+    evening_visual_test: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>',
+    viewing_style_visual_test: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M17 8h4M3 16h4M17 16h4"/></svg>',
+    mood_visual_test: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 1 0-7.8 7.8l8.8 8.6 8.8-8.6a5.5 5.5 0 0 0 0-7.8z"/></svg>'
+  };
+  const DEFAULT_TEST_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+  function iconFor(id) { return TEST_ICONS[id] || DEFAULT_TEST_ICON; }
+
   const FEEDBACK_REASONS = [
     { id: 'too_heavy', label: 'слишком тяжёлое' },
     { id: 'too_light', label: 'слишком лёгкое' },
@@ -142,6 +151,8 @@
     state.selectedResultId = null;
   }
 
+  document.addEventListener('i18n:change', renderHomeBlock);
+
   function handleCloseRequest() {
     if (['result', 'recommendations', 'saved-notice', 'pick-test'].includes(state.step)) {
       closeOverlay(true);
@@ -176,15 +187,14 @@
   function renderHomeBlock() {
     const block = document.getElementById('short-visual-tests-section');
     if (!block) return;
+    const T = (k, f) => (window.t ? window.t(k) : f);
 
     if (!state.tests.length) {
       block.innerHTML = `
-        <div class="short-visual-panel">
-          <div class="short-visual-header">
-            <h2 class="section-heading">Короткие визуальные тесты</h2>
-            <div class="rec-loading">${window.LoadingUI.ai('Загрузка тестов...', { tag: false, compact: true })}</div>
-          </div>
-        </div>`;
+        <article class="short-visual-card">
+          <h3 class="short-visual-card-title">${escapeHtml(T('short.title', 'Короткие визуальные тесты'))}</h3>
+          <div class="rec-loading">${window.LoadingUI.ai('Загрузка тестов...', { tag: false, compact: true })}</div>
+        </article>`;
       return;
     }
 
@@ -192,35 +202,28 @@
       const last = state.lastResults[test.id];
       const doneHtml = last
         ? `<div class="short-visual-card-done">
-            <span class="short-visual-card-done-label">Последний результат</span>
+            <span class="short-visual-card-done-label">${escapeHtml(T('short.lastResult', 'Последний результат'))}</span>
             <span class="short-visual-card-done-date">${escapeHtml(formatDate(last.completedAt))}</span>
             <strong class="short-visual-card-done-profile">${escapeHtml(last.profileTitle)}</strong>
           </div>`
         : '';
       const actions = last
-        ? `<button type="button" class="btn-primary short-visual-start-btn" data-test-id="${escapeHtml(test.id)}">Пройти заново</button>
-           <button type="button" class="short-visual-btn-secondary short-visual-recs-btn" data-result-id="${escapeHtml(last.id)}">Рекомендации</button>`
-        : `<button type="button" class="btn-primary short-visual-start-btn" data-test-id="${escapeHtml(test.id)}">Пройти тест</button>`;
+        ? `<button type="button" class="btn-primary short-visual-start-btn" data-test-id="${escapeHtml(test.id)}">${escapeHtml(T('test.retake', 'Пройти заново'))}</button>
+           <button type="button" class="short-visual-btn-secondary short-visual-recs-btn" data-result-id="${escapeHtml(last.id)}">${escapeHtml(T('short.recs', 'Рекомендации'))}</button>`
+        : `<button type="button" class="btn-primary short-visual-start-btn" data-test-id="${escapeHtml(test.id)}">${escapeHtml(T('short.start', 'Пройти тест'))}</button>`;
 
       return `
         <article class="short-visual-card">
+          <div class="test-icon">${iconFor(test.id)}</div>
           <h3 class="short-visual-card-title">${escapeHtml(test.title)}</h3>
           <p class="short-visual-card-desc">${escapeHtml(test.description)}</p>
-          <p class="short-visual-card-meta">${escapeHtml(test.cardHint || '4 картинки')}</p>
+          <p class="short-visual-card-meta">${escapeHtml(test.cardHint || T('short.cards4', '4 картинки'))}</p>
           ${doneHtml}
           <div class="short-visual-card-actions">${actions}</div>
         </article>`;
     }).join('');
 
-    block.innerHTML = `
-      <div class="short-visual-panel">
-        <div class="short-visual-header">
-          <h2 class="section-heading">Короткие визуальные тесты</h2>
-          <p class="panel-hint">Выберите образы на 4 картинках, а AI подберёт фильмы и сериалы под ваше настроение, жанровый вкус и стиль просмотра.</p>
-        </div>
-        <div class="short-visual-grid">${cards}</div>
-      </div>
-    `;
+    block.innerHTML = cards;
 
     block.querySelectorAll('.short-visual-start-btn').forEach((btn) => {
       btn.addEventListener('click', () => startTest(btn.dataset.testId));
@@ -335,10 +338,18 @@
     if (state.step === 'result') {
       const r = state.result;
       if (!r) return;
+      const guestNotice = state.guestResult
+        ? `<p class="psych-guest-notice">⚠ Результат не сохранится. <button type="button" class="psych-inline-login" id="short-visual-login-link">Войдите</button>, чтобы хранить историю профиля и получать персональные рекомендации.</p>`
+        : '';
+      const saveBtn = state.guestResult
+        ? `<button type="button" class="short-visual-btn-ghost" id="short-visual-login-save-btn">Войти, чтобы сохранить</button>`
+        : `<button type="button" class="short-visual-btn-ghost" id="short-visual-save-btn">Сохранить результат</button>`;
+
       container.innerHTML = `
         <p class="short-visual-eyebrow">Ваш результат</p>
         <h2 id="short-visual-step-title" class="short-visual-title">${escapeHtml(r.profileTitle)}</h2>
         <p class="short-visual-lead">${escapeHtml(r.profileDescription || '')}</p>
+        ${guestNotice}
         <div class="short-visual-meta-row">
           <span class="short-visual-meta-chip">Вторичный: ${escapeHtml(r.secondaryProfileTitle || '—')}</span>
           <span class="short-visual-meta-chip">Темп: ${escapeHtml(r.pace || '—')}</span>
@@ -352,7 +363,7 @@
         </div>
         <div class="short-visual-actions short-visual-actions--result">
           <button type="button" class="btn-primary" id="short-visual-get-recs-btn">Получить рекомендации</button>
-          <button type="button" class="short-visual-btn-ghost" id="short-visual-save-btn">Сохранить результат</button>
+          ${saveBtn}
           <button type="button" class="short-visual-btn-ghost" id="short-visual-other-test-btn">Пройти другой тест</button>
           <button type="button" class="short-visual-btn-ghost" id="short-visual-retake-btn">Пройти заново</button>
           <button type="button" class="short-visual-btn-ghost" id="short-visual-close-result-btn">Закрыть</button>
@@ -364,6 +375,9 @@
         renderStep();
       });
       container.querySelector('#short-visual-save-btn')?.addEventListener('click', () => toast('Результат уже сохранён', 'success'));
+      const shortLogin = () => (window.requireLogin ? window.requireLogin() : (window.location.href = '/'));
+      container.querySelector('#short-visual-login-link')?.addEventListener('click', shortLogin);
+      container.querySelector('#short-visual-login-save-btn')?.addEventListener('click', shortLogin);
       container.querySelector('#short-visual-other-test-btn')?.addEventListener('click', () => {
         state.step = 'pick-test';
         renderStep();
@@ -438,6 +452,10 @@
     }
   }
 
+  function isGuest() {
+    return typeof window.isLoggedIn === 'function' ? !window.isLoggedIn() : false;
+  }
+
   async function submitTest() {
     const container = ensureOverlay().querySelector('#short-visual-step-content');
     if (container) container.innerHTML = '<div class="short-visual-loading">' + window.LoadingUI.ai('Считаем ваш профиль просмотра...', { panel: true, tag: false }) + '</div>';
@@ -446,6 +464,7 @@
       imageType: q.imageType,
       selectedOption: state.answers[q.id]
     }));
+    state.lastAnswers = answers;
 
     try {
       const res = await fetch('/api/short-visual-tests', {
@@ -459,12 +478,18 @@
       state.result = data.result;
       state.lastResults[state.activeTestId] = data.result;
       state.dirty = false;
+      state.guestResult = data.guest === true || data.saved === false;
+      if (state.guestResult) window.GuestStore?.saveTest?.('short', { testId: state.activeTestId, answers });
       state.selectedResultId = data.result?.id || null;
-      state.step = data.isRetake ? 'saved-notice' : 'result';
+      state.step = (data.isRetake && !state.guestResult) ? 'saved-notice' : 'result';
       renderStep();
       renderHomeBlock();
       window.refreshProfilePage?.();
-      toast('Профиль просмотра сохранён', 'success');
+      if (state.guestResult) {
+        toast('Результат не сохранён — войдите, чтобы хранить историю', 'info');
+      } else {
+        toast('Профиль просмотра сохранён', 'success');
+      }
     } catch (err) {
       toast(err.message || 'Ошибка сохранения', 'error');
       state.step = 'question';
@@ -495,14 +520,21 @@
     const posterUrl = window.MovieDisplay?.posterUrl?.(item.poster) || item.poster;
     const inList = isInList(item.title);
     const testConnection = formatTestConnection(item);
+    // Постер/название ведут на страницу фильма (если известен tmdbId).
+    const pageHref = window.MovieDisplay?.moviePageUrl?.(item);
+    const posterInner = `${posterUrl ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy">` : '🎬'}`;
+    const posterHtml = pageHref
+      ? `<a href="${pageHref}" class="short-visual-rec-poster" title="Открыть страницу фильма">${posterInner}</a>`
+      : `<div class="short-visual-rec-poster">${posterInner}</div>`;
+    const titleHtml = pageHref
+      ? `<h3><a href="${pageHref}" class="short-visual-rec-title-link" title="Открыть страницу фильма">${escapeHtml(item.title)}</a></h3>`
+      : `<h3>${escapeHtml(item.title)}</h3>`;
 
     card.innerHTML = `
-      <div class="short-visual-rec-poster">
-        ${posterUrl ? `<img src="${escapeHtml(posterUrl)}" alt="" loading="lazy">` : '🎬'}
-      </div>
+      ${posterHtml}
       <div class="short-visual-rec-body">
         <div class="short-visual-rec-head">
-          <h3>${escapeHtml(item.title)}</h3>
+          ${titleHtml}
           <span class="short-visual-rec-meta">${escapeHtml(String(item.year || ''))} · ${typeLabel}</span>
         </div>
         ${item.genres?.length ? `<p class="short-visual-rec-genres">${item.genres.map(escapeHtml).join(' · ')}</p>` : ''}
@@ -572,6 +604,11 @@
     try {
       const body = { mediaType: getActiveMediaType() };
       if (state.selectedResultId) body.resultId = state.selectedResultId;
+      // Гость: профиль не сохранён — передаём testId и ответы для пересчёта.
+      if (isGuest() && Array.isArray(state.lastAnswers) && state.lastAnswers.length) {
+        body.testId = state.activeTestId;
+        body.answers = state.lastAnswers;
+      }
 
       const res = await fetch('/api/short-visual-tests/recommendations', {
         method: 'POST',
@@ -609,7 +646,7 @@
   async function refresh() {
     const block = document.getElementById('short-visual-tests-section');
     if (block) {
-      block.innerHTML = '<div class="short-visual-panel"><div class="rec-loading">' + window.LoadingUI.ai('Загрузка тестов...', { tag: false, compact: true }) + '</div></div>';
+      block.innerHTML = '<article class="short-visual-card"><div class="rec-loading">' + window.LoadingUI.ai('Загрузка тестов...', { tag: false, compact: true }) + '</div></article>';
     }
     try {
       const res = await fetch('/api/short-visual-tests', { headers: window.authHeaders() });

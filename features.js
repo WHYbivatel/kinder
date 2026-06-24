@@ -4,17 +4,19 @@ const collectionInput = document.getElementById('collection-input');
 const collectionSubmit = document.getElementById('collection-submit');
 const collectionResults = document.getElementById('collection-results');
 
+const ft = (key, fallback) => (window.t ? window.t(key) : fallback);
+
 const PRESETS = [
-  { id: 'evening', label: 'На вечер' },
-  { id: 'weekend', label: 'На выходные' },
-  { id: 'short', label: 'До 90 мин' },
-  { id: 'alone', label: 'Одному' },
-  { id: 'date', label: 'С парой' },
-  { id: 'friends', label: 'С друзьями' },
-  { id: 'light', label: 'Лёгкое' },
-  { id: 'serious', label: 'Серьёзное' },
-  { id: 'puzzle', label: 'Мозголомки' },
-  { id: 'twist', label: 'С концовкой' }
+  { id: 'evening', labelKey: 'preset.evening', label: 'На вечер' },
+  { id: 'weekend', labelKey: 'preset.weekend', label: 'На выходные' },
+  { id: 'short', labelKey: 'preset.short', label: 'До 90 мин' },
+  { id: 'alone', labelKey: 'preset.alone', label: 'Одному' },
+  { id: 'date', labelKey: 'preset.date', label: 'С парой' },
+  { id: 'friends', labelKey: 'preset.friends', label: 'С друзьями' },
+  { id: 'light', labelKey: 'preset.light', label: 'Лёгкое' },
+  { id: 'serious', labelKey: 'preset.serious', label: 'Серьёзное' },
+  { id: 'puzzle', labelKey: 'preset.puzzle', label: 'Мозголомки' },
+  { id: 'twist', labelKey: 'preset.twist', label: 'С концовкой' }
 ];
 
 function renderPickList(container, items, titleKey, reasonKey) {
@@ -67,7 +69,7 @@ function renderPickList(container, items, titleKey, reasonKey) {
 }
 
 async function loadCollection(query, preset) {
-  collectionResults.innerHTML = window.LoadingUI.aiRecommendations('Подбираю...', 3, { tag: 'li' });
+  collectionResults.innerHTML = window.LoadingUI.aiRecommendations(ft('collections.picking', 'Подбираю...'), 3, { tag: 'li' });
   try {
     const res = await fetch('/api/collections', {
       method: 'POST',
@@ -76,12 +78,20 @@ async function loadCollection(query, preset) {
     });
     const data = await res.json();
     if (!res.ok) {
-      collectionResults.innerHTML = `<li class="rec-empty">${data.error || 'Ошибка подборки'}</li>`;
+      if (res.status === 401 && window.requireLogin) {
+        window.requireLogin(data.error || ft('collections.loginRequired', 'Войдите, чтобы пользоваться умными подборками.'));
+      }
+      collectionResults.innerHTML = `<li class="rec-empty">${data.error || ft('collections.error', 'Ошибка подборки')}</li>`;
       return;
     }
-    renderPickList(collectionResults, data.picks || [], 'title', 'reason');
+    const picks = data.picks || [];
+    if (!picks.length) {
+      collectionResults.innerHTML = `<li class="rec-empty">${data.notice || ft('collections.empty', 'Ничего не подобралось. Отметьте фильмы как «посмотрел» и поставьте оценки.')}</li>`;
+      return;
+    }
+    renderPickList(collectionResults, picks, 'title', 'reason');
   } catch (e) {
-    collectionResults.innerHTML = '<li class="rec-empty">Сервер недоступен</li>';
+    collectionResults.innerHTML = `<li class="rec-empty">${ft('collections.serverDown', 'Сервер недоступен')}</li>`;
   }
 }
 
@@ -90,15 +100,31 @@ if (collectionPresets) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'preset-btn';
-    btn.textContent = p.label;
+    btn.dataset.presetKey = p.labelKey;
+    btn.textContent = ft(p.labelKey, p.label);
     btn.addEventListener('click', () => loadCollection(null, p.id));
     collectionPresets.appendChild(btn);
+  });
+  document.addEventListener('i18n:change', () => {
+    collectionPresets.querySelectorAll('.preset-btn').forEach((btn) => {
+      const key = btn.dataset.presetKey;
+      if (key) btn.textContent = ft(key, btn.textContent);
+    });
   });
 }
 
 collectionSubmit?.addEventListener('click', () => {
   const q = collectionInput?.value.trim();
-  if (q) loadCollection(q, null);
+  // Пустой запрос — не «глухая» кнопка, а персональная подборка по алгоритму.
+  loadCollection(q || null, null);
+});
+
+// Enter в поле запроса — тоже запускает подбор.
+collectionInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    loadCollection(collectionInput.value.trim() || null, null);
+  }
 });
 
 // Импорт
@@ -153,9 +179,8 @@ async function refreshStats() {
     if (!res.ok) return;
 
     statsGrid.innerHTML = `
-      <div class="stat-card"><span class="stat-num">${data.weekCount}</span><span class="stat-label">за неделю</span></div>
-      <div class="stat-card"><span class="stat-num">${data.monthCount}</span><span class="stat-label">за месяц</span></div>
-      <div class="stat-card"><span class="stat-num">${data.totalWatched}</span><span class="stat-label">всего</span></div>
+      <div class="stat-card"><span class="stat-num">${data.totalWatched ?? 0}</span><span class="stat-label">просмотрено</span></div>
+      <div class="stat-card"><span class="stat-num">${data.plannedCount ?? 0}</span><span class="stat-label">в планах</span></div>
       <div class="stat-card"><span class="stat-num">${data.avgRating ?? '—'}</span><span class="stat-label">средняя оценка</span></div>
     `;
 
@@ -174,8 +199,8 @@ async function refreshStats() {
     const genresEl = document.getElementById('stats-genres');
     if (genresEl) {
       genresEl.innerHTML = (data.favoriteGenres || []).map((g) =>
-        `<span class="tag-chip">${g.name} (${g.count})</span>`
-      ).join('') || '—';
+        `<span class="tag-chip">${g.name} <small>${g.count}</small></span>`
+      ).join('') || '<span class="rec-empty">Пока нет данных</span>';
     }
   } catch (e) { /* skip */ }
 }
@@ -195,6 +220,21 @@ function closeModal() {
 modalClose?.addEventListener('click', closeModal);
 modalOverlay?.addEventListener('click', (e) => {
   if (e.target === modalOverlay) closeModal();
+});
+
+// Надёжное закрытие через делегирование: срабатывает, даже если прямой
+// слушатель на кнопке был потерян (перерисовка DOM / порядок загрузки),
+// плюс закрытие по Escape.
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#modal-close')) {
+    e.preventDefault();
+    closeModal();
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && modalOverlay && !modalOverlay.classList.contains('hidden')) {
+    closeModal();
+  }
 });
 
 function openModal(title, bodyHtml) {

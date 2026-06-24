@@ -11,6 +11,10 @@
     return window.MovieDisplay?.escapeHtml(String(text ?? '')) || String(text ?? '');
   }
 
+  function XT(key, fallback, vars) {
+    return window.t ? window.t(key, vars) : fallback;
+  }
+
   function posterSrc(url) {
     return window.MovieDisplay?.posterUrl(url) || url;
   }
@@ -305,8 +309,18 @@
     clearPremiereAutoScroll();
 
     const getStep = () => {
+      // Один шаг = ровно ширина видимой области (один фильм на экран). В
+      // app-режиме у карточки есть боковые margin'ы, входящие в «слот»,
+      // поэтому ориентируемся на ширину вьюпорта, а не карточки — иначе
+      // листание «сползает». Карточный расчёт оставлен как фолбэк.
+      if (viewport.clientWidth) return viewport.clientWidth;
       const card = viewport.querySelector('.premiere-ribbon-card');
-      return card ? card.offsetWidth + 16 : 360;
+      if (!card) return 360;
+      const track = viewport.querySelector('.premiere-ribbon-track');
+      const gap = track ? (parseFloat(getComputedStyle(track).columnGap) || 0) : 0;
+      const cs = getComputedStyle(card);
+      const mx = (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0);
+      return card.offsetWidth + mx + gap;
     };
 
     const scrollByDir = (dir) => {
@@ -359,110 +373,68 @@
     };
   }
 
+  // Минимальная плитка премьеры: постер, название, жанр+год, рейтинг.
+  // Вся остальная инфа — на странице фильма (открывается по тапу).
   function renderPremiereRibbonCard(item) {
-    const card = document.createElement('article');
-    card.className = 'premiere-ribbon-card';
+    const href = item.tmdbId ? `/movie.html?type=${item.mediaType === 'tv' ? 'tv' : 'movie'}&id=${item.tmdbId}` : null;
+    const card = document.createElement(href ? 'a' : 'article');
+    card.className = 'premiere-ribbon-card premiere-ribbon-card--mini';
     card.dataset.release = item.releaseDate || '';
+    if (href) { card.href = href; }
 
     const posterWrap = document.createElement('div');
     posterWrap.className = 'premiere-ribbon-poster';
-    if (item.poster) {
-      const img = document.createElement('img');
-      img.className = 'premiere-ribbon-poster-img';
-      img.src = premierePosterUrl(item);
-      img.alt = item.title;
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      posterWrap.appendChild(img);
-    } else {
-      posterWrap.classList.add('premiere-ribbon-poster--empty');
-      posterWrap.textContent = '🎬';
+    const img = document.createElement('img');
+    img.className = 'premiere-ribbon-poster-img';
+    img.src = premierePosterUrl(item);
+    img.alt = item.title;
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.addEventListener('error', () => {
+      card.remove();
+      updatePremiereRibbonProgress();
+    });
+    posterWrap.appendChild(img);
+
+    const rating = item.voteAverage ? Number(item.voteAverage).toFixed(1) : null;
+    if (rating) {
+      const r = document.createElement('span');
+      r.className = 'premiere-ribbon-rating';
+      r.textContent = `★ ${rating}`;
+      posterWrap.appendChild(r);
+    }
+    if (item.siteRating?.average) {
+      const sr = document.createElement('span');
+      sr.className = 'premiere-ribbon-rating premiere-ribbon-rating--site';
+      sr.title = `Оценка пользователей сайта (${item.siteRating.count})`;
+      sr.textContent = `★ ${item.siteRating.average}`;
+      posterWrap.appendChild(sr);
+    }
+    if (item.mediaType === 'tv') {
+      const tv = document.createElement('span');
+      tv.className = 'premiere-ribbon-typebadge';
+      tv.textContent = 'Сериал';
+      posterWrap.appendChild(tv);
     }
     card.appendChild(posterWrap);
 
     const body = document.createElement('div');
     body.className = 'premiere-ribbon-body';
 
-    const badges = document.createElement('div');
-    badges.className = 'premiere-ribbon-badges';
-    badges.innerHTML = `
-      <span class="premiere-ribbon-badge premiere-ribbon-badge--date">${esc(formatPremiereDate(item))}</span>
-      ${item.mediaType === 'tv' ? '<span class="premiere-ribbon-badge premiere-ribbon-badge--tv">Сериал</span>' : ''}
-      ${item.inList ? '<span class="premiere-ribbon-badge premiere-ribbon-badge--list">В списке</span>' : ''}`;
-    body.appendChild(badges);
-
     const title = document.createElement('h3');
     title.className = 'premiere-ribbon-card-title';
     title.textContent = item.title;
     body.appendChild(title);
 
-    const originalHtml = window.MovieDisplay?.formatOriginalTitleHtml(
-      item.originalTitle,
-      item.title,
-      'premiere-ribbon-original'
-    );
-    if (originalHtml) body.insertAdjacentHTML('beforeend', originalHtml);
-
     const meta = document.createElement('p');
     meta.className = 'premiere-ribbon-meta';
+    const year = item.year || (item.releaseDate ? item.releaseDate.slice(0, 4) : '');
     const metaParts = [];
-    if (item.year) metaParts.push(item.year);
-    if (item.voteAverage) metaParts.push(`★ ${Number(item.voteAverage).toFixed(1)}`);
-    if (item.genres?.length) metaParts.push(item.genres.slice(0, 3).join(', '));
-    meta.textContent = metaParts.join(' · ');
-    if (metaParts.length) body.appendChild(meta);
+    if (item.genres?.length) metaParts.push(item.genres.slice(0, 1).join(', '));
+    if (year) metaParts.push(String(year));
+    meta.textContent = metaParts.join(' · ') || formatPremiereDate(item);
+    body.appendChild(meta);
 
-    const overview = item.overview || '';
-    if (overview) {
-      const desc = document.createElement('p');
-      desc.className = 'premiere-ribbon-overview';
-      desc.textContent = overview;
-      body.appendChild(desc);
-    }
-
-    const whyText = item.whyDetailed && item.whyDetailed !== item.reason
-      ? item.whyDetailed
-      : (!overview && item.reason ? item.reason : null);
-    const whyToggle = window.MovieDisplay?.createWhyToggle(whyText);
-    if (whyToggle) body.appendChild(whyToggle);
-
-    if (item.reason && overview && item.reason !== overview) {
-      const reasonEl = document.createElement('p');
-      reasonEl.className = 'premiere-ribbon-reason';
-      reasonEl.textContent = item.reason;
-      body.appendChild(reasonEl);
-    }
-
-    const actions = document.createElement('div');
-    actions.className = 'premiere-ribbon-actions';
-
-    if (!item.inList && item.title !== 'Начните с просмотра') {
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'premiere-ribbon-btn premiere-ribbon-btn--primary';
-      if (isMovieInList(item.title)) {
-        addBtn.textContent = '✓ В списке';
-        addBtn.disabled = true;
-      } else {
-        addBtn.textContent = '+ В список';
-        addBtn.addEventListener('click', () => {
-          const r = window.MovieApp.addMovie({
-            title: item.title,
-            status: 'want',
-            mediaType: item.mediaType || 'movie'
-          });
-          if (r.success) {
-            addBtn.textContent = '✓ В списке';
-            addBtn.disabled = true;
-            item.inList = true;
-            loadPremieres();
-          }
-        });
-      }
-      actions.appendChild(addBtn);
-    }
-
-    body.appendChild(actions);
     card.appendChild(body);
     return card;
   }
@@ -591,7 +563,7 @@
   function renderMainPremieres() {
     const today = new Date().toISOString().slice(0, 10);
     const sorted = sortPremiereItems(
-      premiereMainItems.filter((item) => isUpcomingPremiereItem(item, today)),
+      premiereMainItems.filter((item) => isUpcomingPremiereItem(item, today) && item.poster),
       premiereSort
     );
     renderPremiereRibbon(sorted);
@@ -668,50 +640,6 @@
       .filter((item) => isUpcomingPremiereItem(item, today))
       .map(normalizePremiereItem);
     renderMainPremieres();
-  }
-
-  async function refreshPremiereSuggestions() {
-    const list = document.getElementById('premiere-suggest-list');
-    const btn = document.getElementById('premiere-suggest-refresh');
-    if (!list) return;
-
-    list.innerHTML = window.LoadingUI.aiRecommendations('Подбираю премьеры...', 3, { tag: 'li' });
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Загрузка...';
-    }
-
-    try {
-      const res = await fetch('/api/premieres/suggest', { headers: window.authHeaders() });
-      const data = await res.json();
-      list.innerHTML = '';
-
-      if (!res.ok) {
-        list.innerHTML = `<li class="rec-empty">${esc(data.error || 'Не удалось загрузить')}</li>`;
-        return;
-      }
-
-      if (!data.suggestions?.length) {
-        list.innerHTML = '<li class="rec-empty">Пока нет подборки</li>';
-        return;
-      }
-
-      renderPremiereList(list, data.suggestions, { showAdd: true });
-    } catch {
-      list.innerHTML = '<li class="rec-empty">Сервер недоступен</li>';
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Обновить';
-      }
-    }
-  }
-
-  function showPremiereSuggestPlaceholder() {
-    const list = document.getElementById('premiere-suggest-list');
-    if (list) {
-      list.innerHTML = '<li class="rec-empty">Нажмите «Обновить», чтобы получить подборку</li>';
-    }
   }
 
   function getWatchNowPrefs(form) {
@@ -847,34 +775,11 @@
     document.getElementById('dup-cancel')?.addEventListener('click', closeModal);
   };
 
-  window.openPersonModal = async function (personId) {
-    openModal('Загрузка...', window.LoadingUI.ai('Загружаю...', { tag: 'p', wrapClass: '' }));
-    const modalBody = document.getElementById('modal-body');
-    const modalTitleEl = document.getElementById('modal-title');
-    try {
-      const res = await fetch(`/api/person/${personId}`, { headers: window.authHeaders() });
-      const data = await res.json();
-      if (!res.ok) {
-        modalBody.innerHTML = `<p class="rec-empty">${esc(data.error || 'Ошибка')}</p>`;
-        return;
-      }
-      modalTitleEl.textContent = data.name;
-      const listHtml = (data.inList || []).map((m) => `
-        <li class="pick-item">
-          <div class="pick-poster">${m.poster ? `<img class="pick-poster-img" src="${esc(posterSrc(m.poster))}" alt="" loading="lazy" decoding="async">` : '<span class="pick-poster-empty">🎬</span>'}</div>
-          <div class="pick-info"><strong>${esc(m.title)}</strong>
-          <p class="pick-reason">${esc(statusLabel(m.status))}${m.rating ? ` · ${m.rating}/10` : ''}</p></div>
-        </li>`).join('') || '<li class="rec-empty">В списке пока нет</li>';
-      modalBody.innerHTML = `
-        <div class="person-modal">
-          ${data.photo ? `<img class="person-photo" src="${esc(data.photo)}" alt="">` : ''}
-          ${data.avgRating ? `<p>Средняя оценка: <strong>${data.avgRating}/10</strong></p>` : ''}
-          ${data.insight ? `<p class="person-insight">💡 ${esc(data.insight)}</p>` : ''}
-          <ul class="pick-results">${listHtml}</ul>
-        </div>`;
-    } catch {
-      modalBody.innerHTML = '<p class="rec-empty">Ошибка загрузки</p>';
-    }
+  // Переход на отдельную страницу человека (актёр/режиссёр/сценарист и др.).
+  // Раньше открывалась модалка; теперь у каждого человека есть своя страница.
+  window.openPersonModal = function (personId) {
+    if (!personId) return;
+    location.href = `/person.html?id=${encodeURIComponent(personId)}`;
   };
 
   window.renderPickListWithWhy = function (container, items) {
@@ -944,8 +849,6 @@
       renderMainPremieres();
     });
 
-    document.getElementById('premiere-suggest-refresh')?.addEventListener('click', refreshPremiereSuggestions);
-
     document.getElementById('blacklist-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const form = e.target;
@@ -993,17 +896,14 @@
   window.refreshExtendedFeatures = function () {
     bindEvents();
     loadPremieres();
-    showPremiereSuggestPlaceholder();
     loadBlacklist();
   };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       bindEvents();
-      showPremiereSuggestPlaceholder();
     });
   } else {
     bindEvents();
-    showPremiereSuggestPlaceholder();
   }
 })();

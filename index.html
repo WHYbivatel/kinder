@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#08080a">
   <meta name="mobile-web-app-capable" content="yes">
@@ -22,98 +22,105 @@
   <link rel="stylesheet" href="visualTest.css">
   <link rel="stylesheet" href="shortVisualTest.css">
   <link rel="stylesheet" href="appShell.css">
+  <link rel="stylesheet" href="catalog.css">
+  <link rel="stylesheet" href="mobile.css">
   <script src="theme.js"></script>
+  <script src="i18n.js"></script>
+  <script src="mobileShell.js"></script>
 </head>
 <body data-page="home">
 
-  <div id="login-overlay" class="login-overlay">
+  <div id="login-overlay" class="login-overlay hidden">
     <div class="login-card">
-      <h1>Мой список фильмов</h1>
+      <button type="button" id="login-close" class="login-close" aria-label="Закрыть" data-i18n-aria="common.close">✕</button>
+      <h1 data-i18n="auth.title">Мой список фильмов</h1>
+      <p id="login-intro" class="login-intro" data-i18n="auth.intro">Войдите по номеру телефона — так сохранятся ваш список, оценки и результаты тестов.</p>
       <p id="open-via-server-hint" class="server-hint hidden"></p>
-      <div id="login-box">
-        <h2>Вход</h2>
-        <form id="login-form">
-          <input type="text" id="login-username" placeholder="Логин" required autocomplete="username">
-          <input type="password" id="login-password" placeholder="Пароль" required autocomplete="current-password">
-          <button type="submit">Войти</button>
-        </form>
-        <p id="login-error" class="auth-error"></p>
-        <p class="auth-switch">Нет аккаунта? <button type="button" id="show-register">Зарегистрироваться</button></p>
-      </div>
-      <div id="register-box" class="hidden">
-        <h2>Регистрация</h2>
-        <form id="register-form">
-          <input type="text" id="register-username" placeholder="Логин (мин. 3 символа)" required>
-          <input type="password" id="register-password" placeholder="Пароль (мин. 4 символа)" required>
-          <button type="submit">Создать аккаунт</button>
-        </form>
-        <p id="register-error" class="auth-error"></p>
-        <p class="auth-switch">Уже есть аккаунт? <button type="button" id="show-login">Войти</button></p>
-      </div>
+      <form id="auth-phone-form" class="auth-form">
+        <input type="tel" id="auth-phone" placeholder="Номер телефона" required autocomplete="tel" inputmode="tel" data-i18n-placeholder="auth.phonePlaceholder">
+        <button type="submit" data-i18n="auth.getCode">Получить код</button>
+      </form>
+      <form id="auth-code-form" class="auth-form hidden">
+        <input type="text" id="auth-code" placeholder="Код из SMS" required autocomplete="one-time-code" inputmode="numeric" maxlength="6" data-i18n-placeholder="auth.codePlaceholder">
+        <button type="submit" data-i18n="auth.submit">Войти</button>
+      </form>
+      <p id="auth-error" class="auth-error"></p>
+      <p id="auth-code-hint" class="auth-hint hidden"><span data-i18n="auth.sentTo">Отправили код на</span> <span id="auth-phone-display"></span>. <button type="button" id="auth-code-back" class="psych-inline-login" data-i18n="auth.changeNumber">Изменить номер</button></p>
+      <p id="auth-hint-default" class="auth-hint" data-i18n="auth.hintDefault">Без пароля. Войдём по коду из SMS. Новый номер — аккаунт создаётся автоматически.</p>
+      <button type="button" id="auth-guest-btn" class="auth-guest-btn" data-i18n="auth.guest">Продолжить как гость</button>
     </div>
   </div>
 
-  <div id="app-content" class="hidden">
+  <div id="app-content">
     <header class="app-header">
       <div class="header-inner">
         <a href="/" class="header-brand header-brand-link">
           <span class="site-logo" aria-hidden="true">🎬</span>
           <div class="header-brand-text">
-            <h1>Мои фильмы</h1>
+            <h1 data-i18n="nav.brand">Мои фильмы</h1>
             <span id="user-greeting" class="user-greeting"></span>
           </div>
         </a>
         <nav class="header-nav" aria-label="Навигация">
-          <a href="/" class="header-nav-link" data-page="home">Список</a>
-          <a href="/battle.html" class="header-nav-link" data-page="battle">Битва фильмов</a>
+          <a href="/" class="header-nav-link" data-page="home" data-i18n="nav.list">Список</a>
+          <a href="/battle.html" class="header-nav-link" data-page="battle" data-i18n="nav.battle">Битва фильмов</a>
         </nav>
         <div class="header-right">
-          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Переключить тему" aria-label="Переключить тему" aria-pressed="false"><span class="theme-toggle-icon" aria-hidden="true">🌙</span></button>
-          <a href="/account.html" class="header-avatar" id="header-avatar" title="Мой аккаунт">?</a>
+          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Переключить тему" aria-label="Переключить тему" data-i18n-title="btn.theme" data-i18n-aria="btn.theme" aria-pressed="false"><span class="theme-toggle-icon" aria-hidden="true">🌙</span></button>
+          <button type="button" id="guest-login-btn" class="guest-login-btn" data-i18n="btn.login">Войти</button>
+          <a href="/account.html" class="header-avatar" id="header-avatar" title="Мой аккаунт" data-i18n-title="btn.account">?</a>
         </div>
       </div>
     </header>
 
-    <section class="premiere-ribbon" id="premiere-ribbon-section" aria-label="Скоро в кино">
+    <section class="premiere-ribbon" id="premiere-ribbon-section" aria-label="Скоро в кино" data-i18n-aria="home.premieresTitle">
       <div class="premiere-ribbon-top">
         <div class="premiere-ribbon-heading">
-          <p class="premiere-ribbon-eyebrow">Премьеры</p>
-          <h2 class="premiere-ribbon-title">Скоро в кино</h2>
+          <p class="premiere-ribbon-eyebrow" data-i18n="home.premieresEyebrow">Премьеры</p>
+          <h2 class="premiere-ribbon-title" data-i18n="home.premieresTitle">Скоро в кино</h2>
         </div>
         <div class="premiere-ribbon-controls">
-          <select id="premiere-sort" class="premiere-sort" aria-label="Сортировка премьер">
-            <option value="date-asc">По дате ↑</option>
-            <option value="date-desc">По дате ↓</option>
-            <option value="title-asc">По алфавиту А–Я</option>
-            <option value="title-desc">По алфавиту Я–А</option>
+          <select id="premiere-sort" class="premiere-sort" aria-label="Сортировка премьер" data-i18n-aria="sort.premieresAria">
+            <option value="date-asc" data-i18n="sort.dateAsc">По дате ↑</option>
+            <option value="date-desc" data-i18n="sort.dateDesc">По дате ↓</option>
+            <option value="title-asc" data-i18n="sort.titleAsc">По алфавиту А–Я</option>
+            <option value="title-desc" data-i18n="sort.titleDesc">По алфавиту Я–А</option>
           </select>
-          <button type="button" id="premiere-ribbon-prev" class="premiere-ribbon-nav" aria-label="Предыдущая премьера">‹</button>
-          <button type="button" id="premiere-ribbon-next" class="premiere-ribbon-nav" aria-label="Следующая премьера">›</button>
         </div>
       </div>
-      <div class="premiere-ribbon-viewport" id="premiere-ribbon-viewport">
-        <div class="premiere-ribbon-track" id="premiere-ribbon-track">
-          <div class="rec-loading premiere-ribbon-empty"><div class="loading-ui loading-ui--compact" role="status"><span class="loading-ui__spinner loading-ui__spinner--sm" aria-hidden="true"></span><span class="loading-ui__text">Загрузка премьер<span class="loading-ui__ellipsis" aria-hidden="true"></span></span></div></div>
+      <div class="premiere-ribbon-stage">
+        <button type="button" id="premiere-ribbon-prev" class="premiere-ribbon-nav premiere-ribbon-nav--prev" aria-label="Предыдущая премьера">‹</button>
+        <div class="premiere-ribbon-viewport" id="premiere-ribbon-viewport">
+          <div class="premiere-ribbon-track" id="premiere-ribbon-track">
+            <div class="rec-loading premiere-ribbon-empty"><div class="loading-ui loading-ui--compact" role="status"><span class="loading-ui__spinner loading-ui__spinner--sm" aria-hidden="true"></span><span class="loading-ui__text">Загрузка премьер<span class="loading-ui__ellipsis" aria-hidden="true"></span></span></div></div>
+          </div>
         </div>
+        <button type="button" id="premiere-ribbon-next" class="premiere-ribbon-nav premiere-ribbon-nav--next" aria-label="Следующая премьера">›</button>
       </div>
       <div class="premiere-ribbon-progress" id="premiere-ribbon-progress" aria-hidden="true"></div>
     </section>
 
-    <section id="psych-test-section" class="psych-test-section content-section"></section>
-
-    <section id="visual-test-section" class="visual-test-section content-section"></section>
-
-    <section id="short-visual-tests-section" class="short-visual-section content-section"></section>
+    <div class="tests-ribbon-wrap" id="tests-ribbon-wrap">
+      <div class="tests-ribbon-head">
+        <h2 class="tests-ribbon-title" data-i18n="home.testsTitle">Тесты</h2>
+        <p class="tests-ribbon-sub" data-i18n="home.testsSub">Пройдите тест — AI подберёт фильмы и сериалы под ваше состояние, восприятие и настроение.</p>
+      </div>
+      <div class="tests-ribbon" id="tests-ribbon">
+        <section id="psych-test-section" class="psych-test-section content-section tests-ribbon-item"></section>
+        <section id="visual-test-section" class="visual-test-section content-section tests-ribbon-item"></section>
+        <section id="short-visual-tests-section" class="short-visual-section content-section tests-ribbon-item"></section>
+      </div>
+    </div>
 
     <div class="app-layout">
       <main class="main-content">
 
         <section class="hero-section">
           <div class="hero-content">
-            <p class="hero-eyebrow">Персональный кинозал</p>
-            <h2 class="hero-title">Не знаешь, что включить?</h2>
-            <p class="hero-subtitle">AI подберёт фильм или сериал под настроение и ваш список</p>
-            <button type="button" id="watch-now-btn" class="watch-now-btn">Что посмотреть прямо сейчас</button>
+            <p class="hero-eyebrow" data-i18n="home.heroEyebrow">Персональный кинозал</p>
+            <h2 class="hero-title" data-i18n="home.heroTitle">Не знаешь, что включить?</h2>
+            <p class="hero-subtitle" data-i18n="home.heroSubtitle">AI подберёт фильм или сериал под настроение и ваш список</p>
+            <button type="button" id="watch-now-btn" class="watch-now-btn" data-i18n="home.watchNow">Что посмотреть прямо сейчас</button>
           </div>
         </section>
 
@@ -121,21 +128,17 @@
           <div class="discover-shell">
             <div class="discover-head">
               <div>
-                <p class="discover-eyebrow">Discovery</p>
-                <h2 id="discover-title" class="section-heading">Свайп-рекомендации</h2>
-                <p id="discover-hint" class="panel-hint">Выбирайте фильмы, сериалы и мультсериалы как в приложении.</p>
+                <p class="discover-eyebrow" data-i18n="home.discoveryEyebrow">Discovery</p>
+                <h2 id="discover-title" class="section-heading" data-i18n="home.discoveryTitle">Свайп-рекомендации</h2>
+                <p id="discover-hint" class="panel-hint" data-i18n="home.discoveryHint">Свайп вправо — хочу, влево — мимо. Нажмите на карточку, чтобы открыть фильм.</p>
               </div>
-              <button type="button" id="discover-refresh" class="rec-refresh-btn">Обновить</button>
-            </div>
-            <div class="discover-tabs" role="group" aria-label="Тип рекомендаций">
-              <button type="button" class="discover-tab discover-tab--active" data-feed="movie">🎬 Фильмы</button>
-              <button type="button" class="discover-tab" data-feed="tv">📺 Сериалы</button>
-              <button type="button" class="discover-tab" data-feed="animation">✨ Мультсериалы</button>
+              <button type="button" id="discover-refresh" class="rec-refresh-btn" data-i18n="common.refresh">Обновить</button>
             </div>
             <div id="discover-stack" class="discover-stack" aria-live="polite"></div>
             <div class="discover-actions" aria-label="Действия со свайп-карточкой">
-              <button type="button" id="discover-skip" class="discover-action discover-action--skip">Пропустить</button>
-              <button type="button" id="discover-like" class="discover-action discover-action--like">Хочу посмотреть</button>
+              <button type="button" id="discover-skip" class="discover-action discover-action--skip" data-i18n="discover.skip">✕ Мимо</button>
+              <button type="button" id="discover-watched" class="discover-action discover-action--watched" data-i18n="discover.watched">✓ Уже смотрел</button>
+              <button type="button" id="discover-like" class="discover-action discover-action--like" data-i18n="discover.like">＋ Хочу</button>
             </div>
             <p id="discover-status" class="discover-status"></p>
           </div>
@@ -147,20 +150,20 @@
               <div class="battle-promo-head">
                 <span class="battle-promo-icon" aria-hidden="true">⚔</span>
                 <div>
-                  <p class="battle-promo-eyebrow">Мини-игра</p>
-                  <h2 id="battle-promo-title" class="battle-promo-title">Битва фильмов</h2>
+                  <p class="battle-promo-eyebrow" data-i18n="battle.eyebrow">Мини-игра</p>
+                  <h2 id="battle-promo-title" class="battle-promo-title" data-i18n="nav.battle">Битва фильмов</h2>
                 </div>
               </div>
-              <p class="battle-promo-desc">
+              <p class="battle-promo-desc" data-i18n="battle.desc">
                 Сравнивайте только фильмы с фильмами и сериалы с сериалами — из того, что вы уже посмотрели.
                 Мы соберём ваш личный топ и покажем, что для вас действительно на первом месте.
               </p>
               <ul class="battle-promo-points">
-                <li>Нужны только «Посмотрел» с оценками — ничего нового добавлять не надо</li>
-                <li>Быстрая битва за пару минут или полный топ на вечер</li>
-                <li>Результат сохраняется — можно вернуться к своему топу позже</li>
+                <li data-i18n="battle.point1">Нужны только «Посмотрел» с оценками — ничего нового добавлять не надо</li>
+                <li data-i18n="battle.point2">Быстрая битва за пару минут или полный топ на вечер</li>
+                <li data-i18n="battle.point3">Результат сохраняется — можно вернуться к своему топу позже</li>
               </ul>
-              <button type="button" id="battle-start-btn" class="battle-start-btn battle-promo-btn">
+              <button type="button" id="battle-start-btn" class="battle-start-btn battle-promo-btn" data-i18n="battle.start">
                 Начать битву
               </button>
             </div>
@@ -172,117 +175,122 @@
           <div class="list-header">
             <div class="list-header-top">
               <div class="list-header-title-row">
-                <h2 id="list-title" class="section-heading">Мои фильмы</h2>
+                <h2 id="list-title" class="section-heading" data-i18n="list.title">Мои фильмы</h2>
                 <span id="list-count" class="list-count"></span>
               </div>
               <div class="list-header-controls">
-                <div class="list-view-toggle" role="group" aria-label="Вид списка">
-                  <button type="button" class="list-view-btn list-view-btn--active" data-view="grid">Сетка</button>
-                  <button type="button" class="list-view-btn" data-view="list">Список</button>
-                </div>
                 <div class="media-tabs">
-                  <button type="button" class="media-tab media-tab--active" data-media="movie">Фильмы</button>
-                  <button type="button" class="media-tab" data-media="tv">Сериалы</button>
+                  <button type="button" class="media-tab media-tab--active" data-media="movie" data-i18n="list.tabMovies">Фильмы</button>
+                  <button type="button" class="media-tab" data-media="tv" data-i18n="list.tabSeries">Сериалы</button>
                 </div>
               </div>
             </div>
             <div class="list-header-actions">
-              <input type="search" id="list-search" class="list-search" placeholder="Поиск по названию, жанру, тегу..." autocomplete="off">
-              <div class="release-filter" role="group" aria-label="Показать премьеры">
-                <button type="button" class="release-filter-btn release-filter-btn--active" data-release="all">Все</button>
-                <button type="button" class="release-filter-btn" data-release="premieres">Премьеры</button>
-                <button type="button" class="release-filter-btn" data-release="released">Вышедшие</button>
-              </div>
-              <button type="button" id="add-series-btn" class="add-series-btn hidden">+ Добавить сериал</button>
+              <input type="search" id="list-search" class="list-search" placeholder="Поиск по названию, жанру, тегу..." autocomplete="off" data-i18n-placeholder="list.searchPlaceholder">
+              <button type="button" id="add-series-btn" class="add-series-btn hidden" data-i18n="list.addSeries">+ Добавить сериал</button>
               <div class="filters">
-                <select id="filter-status">
-                  <option value="">Все статусы</option>
-                  <option value="want">Хочу посмотреть</option>
-                  <option value="watching">Смотрю</option>
-                  <option value="watched">Посмотрел</option>
+                <select id="filter-genre"><option value="" data-i18n="list.allGenres">Все жанры</option></select>
+                <select id="sort-by" aria-label="Сортировка">
+                  <option value="added" data-i18n="list.sortAdded">Сначала новые</option>
+                  <option value="rating" data-i18n="list.sortRating">По рейтингу</option>
+                  <option value="year" data-i18n="list.sortYear">По году</option>
+                  <option value="title" data-i18n="list.sortTitle">По названию</option>
                 </select>
-                <select id="filter-genre"><option value="">Все жанры</option></select>
-                <select id="filter-tag"><option value="">Все теги</option></select>
-                <button type="button" id="reset-filters-btn" class="reset-filters-btn hidden">Сбросить фильтры</button>
+                <button type="button" id="reset-filters-btn" class="reset-filters-btn hidden" data-i18n="list.resetFilters">Сбросить фильтры</button>
               </div>
             </div>
           </div>
-          <p id="empty-message" class="empty-message">Пока нет фильмов.</p>
+          <p id="empty-message" class="empty-message" data-i18n="list.empty">Пока нет фильмов.</p>
           <div id="movie-list" class="movie-list movie-list--grid"></div>
         </section>
 
-        <section id="recommendations-box" class="recommendations-box content-row">
-          <div class="rec-header">
-            <h2 class="section-heading">Рекомендации для вас</h2>
-            <button type="button" id="rec-refresh-btn" class="rec-refresh-btn">Обновить</button>
+        <section id="home-collections" class="home-collections content-section" aria-labelledby="home-collections-title">
+          <div class="home-collections-head">
+          <p class="catalog-eyebrow" data-i18n="home.collectionsEyebrow">Подборки</p>
+          <h2 id="home-collections-title" class="section-heading" data-i18n="home.collectionsTitle">Готовые подборки</h2>
+          <p class="panel-hint" data-i18n="home.collectionsHint">Топы, жанры, страны и темы — листайте ленты вбок, открывайте подборку и добавляйте фильмы в список.</p>
           </div>
-          <div class="content-row-scroll">
-            <ul id="recommendations-list"></ul>
-          </div>
+          <div id="home-collections-list" class="home-collections-list"></div>
         </section>
 
+        <section id="catalog-section" class="catalog-section content-section" aria-labelledby="catalog-title">
+          <div class="catalog-head">
+          <p class="catalog-eyebrow" data-i18n="home.catalogEyebrow">Каталог</p>
+          <h2 id="catalog-title" class="section-heading" data-i18n="home.catalogTitle">Категории</h2>
+          <p class="panel-hint" data-i18n="home.catalogHint">Выберите категорию — фильмы раскроются прямо под ней. Ниже — 200 лучших за всё время.</p>
+          </div>
+
+          <div id="catalog-index" class="catalog-index"></div>
+
+          <section class="cat-top-section">
+            <div class="cat-top-head">
+              <h3 class="cat-row-title" data-i18n="catalog.top200">200 лучших за всё время</h3>
+              <div id="catalog-top-filter" class="cat-top-filter" role="group" aria-label="Фильтр подборки">
+                <button type="button" class="cat-top-tab cat-top-tab--active" data-filter="all" data-i18n="catalog.all">Всё</button>
+                <button type="button" class="cat-top-tab" data-filter="movie" data-i18n="list.tabMovies">Фильмы</button>
+                <button type="button" class="cat-top-tab" data-filter="tv" data-i18n="list.tabSeries">Сериалы</button>
+              </div>
+            </div>
+            <div id="catalog-top-sentinel" class="cat-top-anchor"></div>
+            <div id="catalog-top-items" class="cat-top-grid"></div>
+          </section>
+        </section>
+
+        <div class="home-grid">
         <section class="collections-section content-section">
-          <h2 class="section-heading">Умные подборки</h2>
+          <h2 class="section-heading" data-i18n="home.smartCollections">Умные подборки</h2>
           <div id="collection-presets" class="preset-grid"></div>
           <div class="collection-free">
-            <input type="text" id="collection-input" placeholder="Например: устал, хочу лёгкое и не тупое">
-            <button type="button" id="collection-submit">Подобрать</button>
+            <input type="text" id="collection-input" placeholder="Например: устал, хочу лёгкое и не тупое" data-i18n-placeholder="collections.inputPlaceholder">
+            <button type="button" id="collection-submit" data-i18n="collections.submit">Подобрать</button>
           </div>
           <ul id="collection-results" class="pick-results"></ul>
         </section>
 
-        <section class="premiere-suggest-section content-section">
-          <div class="premiere-suggest-header">
-            <h2 class="section-heading">Может заинтересовать</h2>
-            <button type="button" id="premiere-suggest-refresh" class="premiere-refresh-btn">Обновить</button>
-          </div>
-          <p class="panel-hint premiere-hint">Предстоящие премьеры по вашему вкусу — нажмите «Обновить»</p>
-          <ul id="premiere-suggest-list" class="premiere-compact-list"></ul>
-        </section>
-
         <section class="blacklist-section content-section blacklist-section--standalone">
-            <h2 class="section-heading">Чёрный список AI</h2>
-            <p class="panel-hint">AI не будет рекомендовать то, что вы исключили</p>
+            <h2 class="section-heading" data-i18n="blacklist.title">Чёрный список AI</h2>
+            <p class="panel-hint" data-i18n="blacklist.hint">AI не будет рекомендовать то, что вы исключили</p>
             <form id="blacklist-form" class="blacklist-form">
-              <label>Жанры <input type="text" name="genres" placeholder="ужасы, мелодрама"></label>
-              <label>Актёры <input type="text" name="actors" placeholder="через запятую"></label>
-              <label>Режиссёры <input type="text" name="directors" placeholder="через запятую"></label>
-              <label>Страны <input type="text" name="countries" placeholder="Индия, Турция"></label>
-              <label>Макс. длительность (мин) <input type="number" name="maxRuntime" placeholder="120"></label>
-              <label>Не старше года <input type="number" name="minYear" placeholder="2000"></label>
-              <label class="checkbox-label"><input type="checkbox" name="excludeHorror"> Исключить ужасы</label>
-              <button type="submit">Сохранить</button>
+              <label><span data-i18n="blacklist.genres">Жанры</span> <input type="text" name="genres" placeholder="ужасы, мелодрама" data-i18n-placeholder="blacklist.genresPh"></label>
+              <label><span data-i18n="blacklist.actors">Актёры</span> <input type="text" name="actors" placeholder="через запятую" data-i18n-placeholder="blacklist.comma"></label>
+              <label><span data-i18n="blacklist.directors">Режиссёры</span> <input type="text" name="directors" placeholder="через запятую" data-i18n-placeholder="blacklist.comma"></label>
+              <label><span data-i18n="blacklist.countries">Страны</span> <input type="text" name="countries" placeholder="Индия, Турция" data-i18n-placeholder="blacklist.countriesPh"></label>
+              <label><span data-i18n="blacklist.maxRuntime">Макс. длительность (мин)</span> <input type="number" name="maxRuntime" placeholder="120"></label>
+              <label><span data-i18n="blacklist.minYear">Не старше года</span> <input type="number" name="minYear" placeholder="2000"></label>
+              <label class="checkbox-label"><input type="checkbox" name="excludeHorror"> <span data-i18n="blacklist.excludeHorror">Исключить ужасы</span></label>
+              <button type="submit" data-i18n="common.save">Сохранить</button>
             </form>
             <p id="blacklist-status" class="import-status"></p>
         </section>
 
         <section class="import-section content-section">
-          <h2 class="section-heading">Импорт и экспорт</h2>
+          <h2 class="section-heading" data-i18n="import.title">Импорт и экспорт</h2>
           <div class="import-formats">
             <select id="import-format">
-              <option value="plain">Простой список / Telegram / заметки</option>
-              <option value="letterboxd">Letterboxd CSV</option>
-              <option value="imdb">IMDb Watchlist</option>
-              <option value="kinopoisk">Кинопоиск (текстом)</option>
-              <option value="series">Список сериалов</option>
+              <option value="plain" data-i18n="import.fmtPlain">Простой список / Telegram / заметки</option>
+              <option value="letterboxd" data-i18n="import.fmtLetterboxd">Letterboxd CSV</option>
+              <option value="imdb" data-i18n="import.fmtImdb">IMDb Watchlist</option>
+              <option value="kinopoisk" data-i18n="import.fmtKinopoisk">Кинопоиск (текстом)</option>
+              <option value="series" data-i18n="import.fmtSeries">Список сериалов</option>
             </select>
             <input type="file" id="import-file" accept=".csv,.txt,.tsv">
           </div>
           <textarea id="import-text" placeholder="Интерстеллар&#10;Бойцовский клуб&#10;или вставьте CSV из Letterboxd / IMDb"></textarea>
           <div class="import-actions">
-            <button type="button" id="import-btn">Импорт (AI)</button>
-            <button type="button" id="import-formats-btn">Импортировать</button>
+            <button type="button" id="import-btn" data-i18n="import.btnAi">Импорт (AI)</button>
+            <button type="button" id="import-formats-btn" data-i18n="import.btnImport">Импортировать</button>
           </div>
           <p id="import-status" class="import-status"></p>
           <p id="import-formats-status" class="import-status"></p>
           <div class="export-actions">
-            <span>Экспорт:</span>
+            <span data-i18n="import.exportLabel">Экспорт:</span>
             <button type="button" class="export-btn" data-format="csv">CSV</button>
             <button type="button" class="export-btn" data-format="json">JSON</button>
             <button type="button" class="export-btn" data-format="pdf">PDF</button>
-            <button type="button" class="export-btn" data-format="backup">Резервная копия</button>
+            <button type="button" class="export-btn" data-format="backup" data-i18n="import.backup">Резервная копия</button>
           </div>
         </section>
+        </div>
       </main>
 
       <aside id="chat-panel" class="chat-panel hidden">
@@ -290,31 +298,31 @@
           <div class="chat-header-info">
             <span class="chat-header-icon" aria-hidden="true">✦</span>
             <div>
-              <h2>AI-помощник</h2>
-              <p class="chat-header-sub">Управление списком и подборки</p>
+              <h2 data-i18n="chat.title">AI-помощник</h2>
+              <p class="chat-header-sub" data-i18n="chat.sub">Управление списком и подборки</p>
             </div>
           </div>
-          <button type="button" id="chat-close" class="chat-close-btn" aria-label="Закрыть чат">✕</button>
+          <button type="button" id="chat-close" class="chat-close-btn" aria-label="Закрыть чат" data-i18n-aria="chat.close">✕</button>
         </div>
         <div id="chat-messages" class="chat-messages">
           <div class="chat-message chat-message--bot">
-            <p class="chat-paragraph">Управляю списком без OpenAI:</p>
+            <p class="chat-paragraph" data-i18n="chat.introLead">Управляю списком без OpenAI:</p>
             <ul class="chat-list chat-list--ul">
-              <li>«Добавь Интерстеллар»</li>
-              <li>«Покажи что хочу посмотреть»</li>
-              <li>«Удали Матрица»</li>
+              <li data-i18n="chat.ex1">«Добавь Интерстеллар»</li>
+              <li data-i18n="chat.ex2">«Покажи что хочу посмотреть»</li>
+              <li data-i18n="chat.ex3">«Удали Матрица»</li>
             </ul>
-            <p class="chat-paragraph chat-paragraph--muted">Для умных рекомендаций нужен баланс OpenAI.</p>
+            <p class="chat-paragraph chat-paragraph--muted" data-i18n="chat.introNote">Для умных рекомендаций нужен баланс OpenAI.</p>
           </div>
         </div>
         <form id="chat-form" class="chat-form" autocomplete="off">
-          <input type="text" id="chat-input" name="chat-message-field" placeholder="Напишите сообщение..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" required>
-          <button type="submit" id="chat-send">Отправить</button>
+          <input type="text" id="chat-input" name="chat-message-field" placeholder="Напишите сообщение..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-i18n-placeholder="chat.placeholder" required>
+          <button type="submit" id="chat-send" data-i18n="chat.send">Отправить</button>
         </form>
       </aside>
     </div>
 
-    <button type="button" id="chat-toggle" class="chat-toggle-btn chat-toggle-btn--fixed" aria-expanded="false">AI-помощник</button>
+    <button type="button" id="chat-toggle" class="chat-toggle-btn chat-toggle-btn--fixed" aria-expanded="false" data-i18n="btn.aiAssistant">AI-помощник</button>
   </div>
 
   <div id="modal-overlay" class="modal-overlay hidden">
@@ -332,10 +340,12 @@
   <script src="dedupeBrowser.js"></script>
   <script src="importParsersBrowser.js"></script>
   <script src="battleLogic.js"></script>
+  <script src="guestStore.js"></script>
   <script src="script.js"></script>
   <script src="features.js"></script>
   <script src="battle.js"></script>
-  <script src="recommendations.js"></script>
+  <script src="catalogBrowser.js"></script>
+  <script src="homeCollections.js"></script>
   <script src="watchNowBrowser.js"></script>
   <script src="discover.js"></script>
   <script src="extendedFeatures.js"></script>

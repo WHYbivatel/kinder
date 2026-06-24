@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#08080a">
   <meta name="mobile-web-app-capable" content="yes">
@@ -22,40 +22,41 @@
   <link rel="stylesheet" href="visualTest.css">
   <link rel="stylesheet" href="shortVisualTest.css">
   <link rel="stylesheet" href="appShell.css">
+  <link rel="stylesheet" href="mobile.css">
   <script src="theme.js"></script>
+  <script src="i18n.js"></script>
+  <script src="mobileShell.js"></script>
 </head>
 <body data-page="account">
 
   <div id="login-overlay" class="login-overlay">
     <div class="login-card">
+      <button type="button" id="login-close" class="login-close" aria-label="Закрыть">✕</button>
       <h1>Мой список фильмов</h1>
+      <p id="login-intro" class="login-intro">Войдите по номеру телефона, чтобы открыть профиль и сохранять прогресс.</p>
       <p id="open-via-server-hint" class="server-hint hidden"></p>
-      <div id="login-box">
-        <h2>Вход</h2>
-        <form id="login-form">
-          <input type="text" id="login-username" placeholder="Логин" required autocomplete="username">
-          <input type="password" id="login-password" placeholder="Пароль" required autocomplete="current-password">
-          <button type="submit">Войти</button>
-        </form>
-        <p id="login-error" class="auth-error"></p>
-        <p class="auth-switch">Нет аккаунта? <button type="button" id="show-register">Зарегистрироваться</button></p>
-      </div>
-      <div id="register-box" class="hidden">
-        <h2>Регистрация</h2>
-        <form id="register-form">
-          <input type="text" id="register-username" placeholder="Логин (мин. 3 символа)" required>
-          <input type="password" id="register-password" placeholder="Пароль (мин. 4 символа)" required>
-          <button type="submit">Создать аккаунт</button>
-        </form>
-        <p id="register-error" class="auth-error"></p>
-        <p class="auth-switch">Уже есть аккаунт? <button type="button" id="show-login">Войти</button></p>
-      </div>
+      <form id="auth-phone-form" class="auth-form">
+        <input type="tel" id="auth-phone" placeholder="Номер телефона" required autocomplete="tel" inputmode="tel">
+        <button type="submit">Получить код</button>
+      </form>
+      <form id="auth-code-form" class="auth-form hidden">
+        <input type="text" id="auth-code" placeholder="Код из SMS" required autocomplete="one-time-code" inputmode="numeric" maxlength="6">
+        <button type="submit">Войти</button>
+      </form>
+      <p id="auth-error" class="auth-error"></p>
+      <p id="auth-code-hint" class="auth-hint hidden">Отправили код на <span id="auth-phone-display"></span>. <button type="button" id="auth-code-back" class="psych-inline-login">Изменить номер</button></p>
+      <p id="auth-hint-default" class="auth-hint">Без пароля. Войдём по коду из SMS. Новый номер — аккаунт создаётся автоматически.</p>
+      <button type="button" id="auth-guest-btn" class="auth-guest-btn">На главную</button>
     </div>
   </div>
 
   <div id="app-content" class="hidden">
     <header class="app-header">
       <div class="header-inner">
+        <button type="button" id="page-back" class="header-back" aria-label="Назад">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+          <span>Назад</span>
+        </button>
         <a href="/" class="header-brand header-brand-link">
           <span class="site-logo" aria-hidden="true">🎬</span>
           <div class="header-brand-text">
@@ -75,89 +76,20 @@
     </header>
 
     <main class="page-content page-content--account">
-      <section class="account-hero content-section">
-        <h2 class="section-heading">Профиль</h2>
-        <p class="panel-hint">Ваш аккаунт, результаты кино-психологического теста и история прохождений</p>
-      </section>
-
-      <section class="content-section profile-section">
-        <h2 class="section-heading">Основная информация</h2>
+      <section class="content-section profile-card-section">
         <div id="profile-info"></div>
       </section>
 
-      <section class="content-section profile-section">
-        <h2 class="section-heading">Кино-психологический тест</h2>
-        <h3 class="profile-subheading">Последний результат</h3>
-        <div id="profile-psych-latest"></div>
-      </section>
-
-      <section class="content-section profile-section">
-        <h3 class="profile-subheading">Как менялся ваш профиль</h3>
-        <div id="profile-psych-dynamics"></div>
-        <div id="profile-psych-chart"></div>
-      </section>
-
-      <section class="content-section profile-section">
-        <h3 class="profile-subheading">История тестов</h3>
-        <div id="profile-psych-history"></div>
-      </section>
-
-      <section class="content-section profile-section profile-section--visual">
-        <h2 class="section-heading">Визуальный тест восприятия</h2>
-        <h3 class="profile-subheading">Последний результат</h3>
-        <div id="profile-visual-latest"></div>
-      </section>
-
-      <section class="content-section profile-section profile-section--visual">
-        <h3 class="profile-subheading">Как менялся визуальный профиль</h3>
-        <div id="profile-visual-dynamics"></div>
-        <div id="profile-visual-chart"></div>
-      </section>
-
-      <section class="content-section profile-section profile-section--visual">
-        <h3 class="profile-subheading">История визуального теста</h3>
-        <div id="profile-visual-history"></div>
-      </section>
-
-      <section class="content-section profile-section profile-section--short-visual">
-        <h2 class="section-heading">Короткие визуальные тесты</h2>
-        <h3 class="profile-subheading">Последний результат</h3>
-        <div id="profile-short-visual-latest"></div>
-      </section>
-
-      <section class="content-section profile-section profile-section--short-visual">
-        <h3 class="profile-subheading">История прохождений</h3>
-        <div id="profile-short-visual-history"></div>
-      </section>
-
       <section class="stats-section content-section">
-        <h2 class="section-heading">Статистика просмотров</h2>
+        <h2 class="section-heading">Статистика</h2>
         <div id="stats-grid" class="stats-grid"></div>
-        <div class="stats-details">
-          <div>
-            <h3>Любимые жанры</h3>
-            <div id="stats-genres"></div>
-          </div>
-          <div>
-            <h3>Последние просмотры</h3>
-            <ul id="stats-recent"></ul>
-          </div>
-          <div>
-            <h3>Динамика по месяцам</h3>
-            <ul id="stats-monthly" class="monthly-chart"></ul>
-          </div>
-        </div>
+        <h3 class="profile-subheading">Любимые жанры</h3>
+        <div id="stats-genres" class="stats-genres"></div>
       </section>
 
-      <section class="taste-section content-section">
-        <div class="taste-section-header">
-          <h2 class="section-heading">AI-описание вашего вкуса</h2>
-          <button type="button" id="taste-refresh-btn" class="rec-refresh-btn">Обновить анализ</button>
-        </div>
-        <p id="taste-analysis-status" class="panel-hint">На основе просмотренных фильмов, оценок и заметок</p>
-        <div id="taste-analysis-content" class="taste-analysis-content">
-          <div class="rec-loading"><div class="loading-ui" role="status"><span class="loading-ui__spinner" aria-hidden="true"></span><span class="loading-ui__text">Загрузка анализа<span class="loading-ui__ellipsis" aria-hidden="true"></span></span></div></div>
-        </div>
+      <section class="content-section profile-section">
+        <h2 class="section-heading">Результаты тестов</h2>
+        <div id="profile-tests-summary"></div>
       </section>
 
       <section class="content-section profile-logout-section">
@@ -178,6 +110,7 @@
 
   <script src="display.js"></script>
   <script src="loadingUI.js"></script>
+  <script src="guestStore.js"></script>
   <script src="script.js"></script>
   <script src="features.js"></script>
   <script src="profile.js"></script>

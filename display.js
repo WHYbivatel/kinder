@@ -94,6 +94,17 @@ window.MovieDisplay = {
     return `https://image.tmdb.org/t/p/${size}${path}`;
   },
 
+  // Ссылка на внутреннюю страницу фильма (/movie.html). Возвращает null, если
+  // у фильма нет tmdbId — тогда переход на страницу невозможен. Используется
+  // во всех местах, где показываются фильмы (список, рекомендации, чат и т.д.),
+  // чтобы по клику на постер/название открывалась карточка фильма.
+  moviePageUrl(item) {
+    const tmdbId = item && (item.tmdbId ?? item.id ?? null);
+    if (!tmdbId) return null;
+    const type = (item.mediaType || item.media_type) === 'tv' ? 'tv' : 'movie';
+    return `/movie.html?type=${type}&id=${encodeURIComponent(tmdbId)}`;
+  },
+
   createWhyToggle(whyText, options = {}) {
     const text = String(whyText || '').trim();
     if (!text) return null;

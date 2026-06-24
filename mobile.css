@@ -1,0 +1,762 @@
+/* ===================================================================
+   mobile.css — слой мобильных правок и гостевого режима.
+   Подключается ПОСЛЕДНИМ, поэтому переопределяет style.css/appShell.css.
+   Базовый принцип: телефон — приоритет; для широких экранов адаптируем
+   через min-width.
+   =================================================================== */
+
+/* ── Запрет зума жестами: разрешаем только прокрутку (без pinch-zoom) ──
+   touch-action на корне отключает pinch-zoom браузера, но оставляет
+   вертикальную/горизонтальную прокрутку. Зоны со своим зумом
+   (.img-lightbox) и свайпы (.discover-card) переопределяют это сами. */
+html {
+  touch-action: pan-x pan-y;
+  -ms-touch-action: pan-x pan-y;
+}
+
+/* ── Оверлей «Поверните телефон» для горизонтальной ориентации ──
+   Показывается только на телефонах в landscape (низкая высота экрана),
+   планшеты/десктоп не затрагиваются. */
+#orientation-lock { display: none; }
+
+@media screen and (orientation: landscape) and (max-height: 500px) {
+  #orientation-lock {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 1.5rem;
+    background: var(--bg-base, #08080a);
+    color: var(--text-primary, #f5f5f7);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+  }
+  .orientation-lock__inner { max-width: 420px; }
+  .orientation-lock__icon {
+    font-size: 3rem;
+    line-height: 1;
+    margin-bottom: 0.8rem;
+    transform: rotate(90deg);
+    display: inline-block;
+    animation: orientation-rotate 1.8s ease-in-out infinite;
+  }
+  .orientation-lock__title {
+    font-size: 1.15rem;
+    font-weight: 800;
+    margin: 0 0 0.4rem;
+  }
+  .orientation-lock__text {
+    font-size: 0.9rem;
+    margin: 0;
+    color: var(--text-secondary, #a0a0a8);
+  }
+}
+
+@keyframes orientation-rotate {
+  0%, 100% { transform: rotate(90deg); }
+  50% { transform: rotate(0deg); }
+}
+
+/* ── Кнопка входа в шапке и баннер гостя ───────────────────────── */
+.guest-login-btn {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+.guest-login-btn:hover { background: var(--accent-hover); }
+
+/* ── Окно входа как модалка (можно закрыть) ────────────────────── */
+.login-card { position: relative; }
+.login-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 1rem;
+  cursor: pointer;
+}
+.login-close:hover { color: var(--text-primary); }
+.login-intro {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin: 0.25rem 0 1rem;
+}
+
+/* ── Гостевое скрытие приватных секций ─────────────────────────── */
+body[data-auth="guest"] #battle-section,
+body[data-auth="guest"] .movie-list-section,
+body[data-auth="guest"] #recommendations-box,
+body[data-auth="guest"] .blacklist-section,
+body[data-auth="guest"] .import-section,
+body[data-auth="guest"] #chat-toggle,
+body[data-auth="guest"] #chat-panel {
+  display: none !important;
+}
+
+/* По умолчанию (до инициализации auth.js) считаем состояние гостевым,
+   чтобы не мигал приватный контент. data-auth выставляется сразу при
+   загрузке auth.js. */
+
+[hidden] { display: none !important; }
+
+/* Состояние шапки по авторизации */
+body[data-auth="user"] .guest-login-btn { display: none; }
+body[data-auth="guest"] #header-avatar { display: none; }
+
+/* ===================================================================
+   СТРАНИЦА ФИЛЬМА (movie.html) — мобайл-first
+   =================================================================== */
+body[data-page="movie"] { background: var(--bg-base); }
+
+.moviepage-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.9rem;
+  background: rgba(8, 8, 10, 0.82);
+  border-bottom: 1px solid var(--border-subtle);
+  backdrop-filter: blur(10px);
+}
+.moviepage-back {
+  border: 1px solid var(--border-default);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.45rem 0.95rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+}
+.moviepage-back:hover { background: var(--bg-card-hover); }
+.moviepage-home { font-size: 1.4rem; text-decoration: none; }
+
+.moviepage { padding-bottom: calc(3rem + env(safe-area-inset-bottom)); }
+.moviepage-loading, .moviepage-error { padding: 3rem 1.5rem; text-align: center; color: var(--text-secondary); }
+
+.movie-hero { position: relative; padding: 1rem 1rem 1.25rem; overflow: hidden; }
+.movie-hero--zoomable { cursor: zoom-in; }
+.movie-hero-bg {
+  position: absolute; inset: -20% -10% 0;
+  background-size: cover; background-position: center;
+  filter: blur(2px) brightness(0.5); transform: scale(1.1);
+}
+.movie-hero-expand {
+  position: absolute; top: 0.75rem; right: 0.75rem; z-index: 2;
+  display: grid; place-items: center;
+  width: 38px; height: 38px; padding: 0;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 50%;
+  background: rgba(0,0,0,0.45);
+  color: #fff; cursor: pointer;
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+}
+.movie-hero-expand svg { width: 18px; height: 18px; }
+.movie-hero-expand:hover { background: rgba(0,0,0,0.65); }
+
+/* ── Полноэкранный просмотр изображения ─────────────────────────── */
+.img-lightbox {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(0,0,0,0.94);
+  display: flex; align-items: center; justify-content: center;
+}
+.img-lightbox.hidden { display: none; }
+body.img-lightbox-open { overflow: hidden; }
+.img-lightbox-stage {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; touch-action: none;
+}
+.img-lightbox-img {
+  max-width: 100vw; max-height: 100vh;
+  object-fit: contain;
+  transform-origin: center center;
+  transition: transform 0.08s ease-out;
+  cursor: zoom-in; user-select: none; -webkit-user-drag: none;
+  will-change: transform;
+}
+.img-lightbox--zoomed .img-lightbox-img { transition: none; }
+.img-lightbox-back {
+  position: absolute; top: calc(0.85rem + env(safe-area-inset-top)); left: 0.85rem; z-index: 3;
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid rgba(255,255,255,0.25); border-radius: var(--radius-pill);
+  background: rgba(0,0,0,0.5); color: #fff;
+  font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.img-lightbox-back:hover { background: rgba(0,0,0,0.7); }
+.img-lightbox-tools {
+  position: absolute; bottom: calc(1.1rem + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 3;
+  display: flex; gap: 0.5rem;
+  padding: 0.4rem; border-radius: var(--radius-pill);
+  background: rgba(0,0,0,0.5);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.img-lightbox-btn {
+  min-width: 44px; height: 40px; padding: 0 0.75rem;
+  border: 1px solid rgba(255,255,255,0.2); border-radius: var(--radius-pill);
+  background: rgba(255,255,255,0.08); color: #fff;
+  font-size: 1.1rem; font-weight: 700; cursor: pointer;
+}
+.img-lightbox-btn:hover { background: rgba(255,255,255,0.18); }
+.movie-hero-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(8,8,10,0.4) 0%, rgba(8,8,10,0.85) 70%, var(--bg-base) 100%);
+}
+.movie-hero-content {
+  position: relative; z-index: 1;
+  display: flex; gap: 1rem; align-items: flex-end;
+  margin-top: 2.5rem;
+}
+.movie-hero-poster {
+  width: 120px; flex: 0 0 120px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.movie-hero-text { flex: 1; min-width: 0; }
+.movie-title { font-size: 1.4rem; line-height: 1.2; margin: 0 0 0.25rem; }
+.movie-original { color: var(--text-muted); font-size: 0.85rem; margin: 0 0 0.4rem; }
+.movie-metaline { color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 0.5rem; }
+
+/* Рейтинги — отдельный аккуратный блок над описанием. */
+.movie-ratings-block { }
+.movie-ratings { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.movie-rating {
+  display: inline-flex; flex-direction: column; align-items: flex-start;
+  gap: 0.1rem; min-width: 70px;
+  padding: 0.45rem 0.7rem; border-radius: var(--radius-md);
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+}
+.movie-rating-src { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.02em; opacity: 0.85; text-transform: uppercase; }
+.movie-rating-val { font-size: 1.05rem; font-weight: 800; color: var(--text-primary); }
+.movie-rating--imdb .movie-rating-src { color: #f5c518; }
+.movie-rating--kp .movie-rating-src { color: #ff6600; }
+.movie-rating--tmdb .movie-rating-src { color: #01b4e4; }
+.movie-rating--site .movie-rating-src { color: #2ecc71; }
+.movie-rating--site small { opacity: 0.7; font-weight: 500; font-size: 0.7rem; }
+
+.movie-genres, .movie-genre { display: inline-flex; }
+.movie-genres { gap: 0.35rem; flex-wrap: wrap; }
+.movie-genre {
+  font-size: 0.75rem; color: var(--text-secondary);
+  padding: 0.15rem 0.5rem; border-radius: var(--radius-pill);
+  background: rgba(255,255,255,0.06);
+}
+
+.movie-body { padding: 0 1rem; display: flex; flex-direction: column; gap: 1.25rem; }
+.movie-tagline { color: var(--text-secondary); font-style: italic; margin: 0; }
+
+/* Внешние ссылки — отдельный блок в самом низу страницы. */
+.movie-watch-section {
+  margin-top: 0.5rem; padding-top: 1.25rem;
+  border-top: 1px solid var(--border-subtle);
+}
+.movie-watch-links { display: flex; flex-direction: column; gap: 0.6rem; }
+.movie-watch-btn {
+  display: block; text-align: center; text-decoration: none;
+  font-weight: 700; padding: 0.8rem 1rem; border-radius: var(--radius-md);
+  color: #fff;
+}
+.movie-watch-btn--hdrezka { background: var(--accent); }
+.movie-watch-btn--hdrezka:hover { background: var(--accent-hover); }
+.movie-watch-btn--kinogo { background: #2563eb; }
+.movie-watch-btn--kinogo:hover { background: #1d4ed8; }
+.movie-watch-btn--search { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-default); }
+.movie-watch-btn--search:hover { background: var(--bg-card-hover); }
+
+/* Кнопка-заглушка, пока проверяем наличие на сайте. */
+.movie-watch-btn--checking {
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  cursor: progress;
+  opacity: 0.85;
+}
+/* Неактивная кнопка: точного совпадения на сайте нет. */
+.movie-watch-btn--disabled {
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border: 1px dashed var(--border-default);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.movie-watch-btn--checking:hover,
+.movie-watch-btn--disabled:hover { background: var(--bg-card); }
+.movie-watch-note {
+  margin: 0.7rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.movie-add { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 0.9rem; }
+.movie-add-label { margin: 0 0 0.6rem; color: var(--text-secondary); font-size: 0.9rem; }
+.movie-add-actions { display: flex; gap: 0.6rem; }
+.movie-add-btn {
+  flex: 1; border: 1px solid var(--border-strong); background: var(--bg-card);
+  color: var(--text-primary); font-weight: 600; font-size: 0.9rem;
+  padding: 0.7rem 0.5rem; border-radius: var(--radius-md); cursor: pointer;
+}
+.movie-add-btn--watched { border-color: var(--status-watched); color: var(--status-watched); }
+.movie-add-btn:disabled { opacity: 0.7; }
+
+.movie-block { }
+.movie-block-title { font-size: 1.05rem; margin: 0 0 0.5rem; }
+.movie-overview { color: var(--text-secondary); line-height: 1.55; margin: 0; }
+.movie-block--inline p { color: var(--text-secondary); margin: 0; }
+
+.movie-cast { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.movie-cast-chip {
+  font-size: 0.8rem; color: var(--text-secondary);
+  padding: 0.3rem 0.6rem; border-radius: var(--radius-pill);
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+}
+
+.movie-trailer {
+  position: relative; width: 100%; aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md); overflow: hidden; background: #000;
+}
+.movie-trailer iframe { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* ── Нативный плеер HDRezka (видео + выбор качества/озвучки) ── */
+.movie-player {
+  position: relative; width: 100%; aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md); overflow: hidden; background: #000;
+}
+.movie-player-video { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; }
+.movie-player-controls {
+  display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 0.6rem;
+}
+.movie-player-ctrl {
+  display: flex; flex-direction: column; gap: 0.25rem;
+  font-size: 0.75rem; color: var(--text-secondary); flex: 1; min-width: 130px;
+}
+.movie-player-ctrl select {
+  appearance: none; -webkit-appearance: none;
+  background: var(--bg-card); color: var(--text-primary);
+  border: 1px solid var(--border-default); border-radius: var(--radius-md);
+  padding: 0.6rem 0.7rem; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+}
+.movie-player-status {
+  padding: 1rem; text-align: center; color: var(--text-muted);
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.movie-player-status--error { color: var(--text-secondary); }
+
+/* ── Торренты (Rutor) ── */
+.movie-torrents-status {
+  padding: 0.9rem 1rem; color: var(--text-muted);
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.torrent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.torrent-item {
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); padding: 0.7rem 0.8rem;
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.torrent-title { font-size: 0.88rem; font-weight: 600; line-height: 1.35; color: var(--text-primary); word-break: break-word; }
+.torrent-meta { display: flex; flex-wrap: wrap; gap: 0.6rem; font-size: 0.8rem; color: var(--text-secondary); }
+.torrent-seeds { color: #22c55e; }
+.torrent-leechs { color: #ef4444; }
+.torrent-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.btn-magnet, .btn-download {
+  flex: 1; min-width: 120px; text-align: center; text-decoration: none;
+  font-weight: 600; font-size: 0.85rem; padding: 0.65rem 0.8rem;
+  border-radius: var(--radius-md); cursor: pointer; border: 1px solid transparent;
+}
+.btn-magnet { background: var(--accent); color: #fff; }
+.btn-magnet:hover { background: var(--accent-hover); }
+.btn-download { background: var(--bg-surface); color: var(--text-primary); border-color: var(--border-default); }
+.btn-download:hover { background: var(--bg-card-hover); }
+.btn-download:disabled { opacity: 0.6; cursor: progress; }
+
+.movie-toast {
+  position: fixed; left: 50%; bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  background: var(--bg-card); color: var(--text-primary);
+  border: 1px solid var(--border-strong); box-shadow: var(--shadow-lg);
+  padding: 0.7rem 1.1rem; border-radius: var(--radius-pill);
+  font-size: 0.9rem; z-index: 200; max-width: 90vw; text-align: center;
+}
+
+/* Десктоп: страница фильма по центру, постер крупнее */
+@media (min-width: 760px) {
+  .moviepage { max-width: 860px; margin: 0 auto; }
+  .movie-hero-poster { width: 180px; flex-basis: 180px; }
+  .movie-title { font-size: 2rem; }
+  .movie-watch-links { flex-direction: row; }
+  .movie-watch-btn { flex: 1; }
+}
+
+/* Кликабельные актёры / режиссёр / сценаристы на странице фильма */
+.movie-cast-chip--link,
+.movie-person-link {
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+.movie-cast-chip--link:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.movie-person-link { color: var(--accent); }
+.movie-person-link:hover { text-decoration: underline; }
+
+/* ===================================================================
+   СТРАНИЦА ЧЕЛОВЕКА (person.html) — повторяет стиль страницы фильма
+   =================================================================== */
+.person-photo--empty {
+  display: grid; place-items: center;
+  width: 120px; height: 170px;
+  background: var(--bg-card); color: var(--text-muted);
+  font-size: 2.4rem;
+}
+.person-known { font-weight: 600; color: var(--text-secondary); }
+
+.person-meta-block {
+  display: flex; flex-direction: column; gap: 0.55rem;
+  background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); padding: 0.9rem 1rem;
+}
+.person-meta-row {
+  display: flex; gap: 0.75rem; align-items: baseline;
+  font-size: 0.9rem; line-height: 1.4;
+}
+.person-meta-label {
+  flex: 0 0 40%; max-width: 45%;
+  color: var(--text-muted); font-size: 0.82rem;
+}
+.person-meta-value { flex: 1; color: var(--text-primary); font-weight: 500; }
+
+.person-bio { white-space: pre-line; }
+
+.person-films-count {
+  font-size: 0.8rem; font-weight: 600; color: var(--text-muted);
+  background: var(--bg-card); border-radius: var(--radius-pill);
+  padding: 0.1rem 0.5rem; vertical-align: middle;
+}
+
+.person-films-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.7rem;
+}
+.person-film-card {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  text-decoration: none; color: inherit;
+}
+.person-film-thumb {
+  position: relative; aspect-ratio: 2 / 3;
+  border-radius: var(--radius-md); overflow: hidden;
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+}
+.person-film-poster { width: 100%; height: 100%; object-fit: cover; display: block; }
+.person-film-poster--empty { display: grid; place-items: center; font-size: 1.8rem; color: var(--text-muted); }
+.person-film-card:hover .person-film-thumb { border-color: var(--accent); }
+.person-film-rating {
+  position: absolute; bottom: 0.3rem; left: 0.3rem;
+  background: rgba(0,0,0,0.7); color: #ffd166;
+  font-size: 0.72rem; font-weight: 700;
+  padding: 0.1rem 0.4rem; border-radius: var(--radius-pill);
+}
+.person-film-info { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.person-film-title {
+  font-size: 0.82rem; font-weight: 600; line-height: 1.25;
+  color: var(--text-primary);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.person-film-sub {
+  font-size: 0.74rem; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+@media (min-width: 760px) {
+  .person-films-grid { grid-template-columns: repeat(5, 1fr); }
+}
+
+/* ===================================================================
+   СВАЙПЫ — единая лента, свайп по всей карточке, минимум инфы
+   =================================================================== */
+/* Свайп должен работать по всей поверхности: запрещаем браузеру
+   перехватывать жесты (это и чинило «только верх постера»). */
+.discover-card {
+  touch-action: none !important;
+  cursor: grab;
+  aspect-ratio: 2 / 3;
+  height: auto !important;
+  /* Ниже, чем было (70vh): иначе нижний баннер с кнопками действий не влезал
+     на экран вместе с заголовком ленты и самой карточкой. */
+  max-height: 58vh;
+}
+.discover-card--dragging { cursor: grabbing; }
+
+/* В app-режиме карточка заполняет колоду целиком (position:absolute inset:0),
+   иначе из-за aspect-ratio/max-height она вылезает за стопку и инфо-полоса
+   с названием/годом уходит под круглые кнопки действий. */
+body.app-mode .discover-card,
+body.app-mode .discover-card--top,
+body.app-mode .discover-card--behind {
+  aspect-ratio: auto !important;
+  height: 100% !important;
+  max-height: none !important;
+}
+
+/* Стопка под высоту карточки — без лишней пустоты сверху/снизу. */
+body.app-mode .discover-stack {
+  min-height: 0;
+  margin-bottom: 0.6rem;
+}
+
+/* Компактнее «шапка» свайпов: заголовок занимает меньше места, подсказку
+   на телефоне прячем — освобождаем место для нижнего баннера с кнопками. */
+body.app-mode .discover-head { margin-bottom: 0.5rem; }
+body.app-mode #discover-hint { display: none; }
+body.app-mode .discover-actions { margin-top: 0.4rem; }
+
+/* Карточка = баннер сверху + компактная инфо-полоска (название + год) снизу. */
+.discover-card .discover-poster {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 0;
+  aspect-ratio: auto !important;
+  background: #0a0a0c;
+}
+/* Размытая подложка из того же постера — заполняет поля по краям, когда
+   постер показывается целиком (object-fit: contain), без обрезки. */
+.discover-card .discover-poster-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(30px) brightness(0.5);
+  transform: scale(1.25);
+  z-index: 0;
+}
+.discover-card .discover-poster img {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* Инфо-полоска под баннером — сплошной фон, чтобы было хорошо читаемо. */
+body.app-mode .discover-card-info { display: block; }
+.discover-card .discover-card-info {
+  flex: 0 0 auto;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-subtle);
+  padding: 0.55rem 0.95rem 0.6rem;
+}
+.discover-card-title {
+  margin: 0 0 0.15rem;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+.discover-card-meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.discover-rating {
+  position: absolute;
+  top: 0.7rem; right: 0.7rem;
+  z-index: 2;
+  background: rgba(0,0,0,0.65);
+  color: #ffd54a;
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: var(--radius-pill);
+}
+.discover-rating--site {
+  top: 2.7rem; /* под основным рейтингом */
+  color: #2ecc71;
+}
+.discover-rating--site small { opacity: 0.8; font-weight: 600; font-size: 0.7rem; }
+
+/* Три кнопки действий: мимо / уже смотрел / хочу */
+.discover-actions { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
+.discover-action--watched {
+  border: 1px solid var(--status-watched);
+  color: var(--status-watched);
+  background: transparent;
+}
+
+/* Подсказка-статус для гостя */
+.discover-status--info { color: var(--accent); }
+
+/* ===================================================================
+   ПРЕМЬЕРЫ — 3 мини-плитки в ряд, скролл с «подглядыванием»
+   =================================================================== */
+/* Переопределяем app-mode: вместо одной плитки на весь экран — три. */
+body.app-mode .premiere-ribbon-card,
+.premiere-ribbon-card--mini {
+  flex: 0 0 29% !important;
+  width: 29% !important;
+  min-width: 29% !important;
+  max-width: 29% !important;
+  margin: 0 !important;
+  scroll-snap-align: start;
+  text-decoration: none;
+  color: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+/* Расстояние между плитками. ВАЖНО: gap для ленты в app-mode задаётся в
+   appShell.css как `gap: 0` с селектором `body.app-mode .premiere-ribbon-track`.
+   Чтобы наш отступ реально применился, перебиваем его таким же по специфичности
+   селектором (mobile.css подключается последним). */
+.premiere-ribbon-track { gap: 0.9rem; padding: 0; }
+body.app-mode .premiere-ribbon-track { gap: 0.9rem; padding: 0; }
+
+/* Боковые «поля» ленты от краёв экрана.
+   Нельзя ставить боковой padding на сам вьюпорт прокрутки — он «съедается»
+   при горизонтальной прокрутке, и крайняя плитка всё равно прилипает к краю.
+   Поэтому сужаем саму область прокрутки, добавляя padding её родителю (stage):
+   так между краем экрана и лентой всегда остаётся постоянный отступ. */
+body.app-mode .premiere-ribbon-viewport { padding: 0 !important; }
+body.app-mode .premiere-ribbon-stage { padding: 0 1.1rem; }
+
+.premiere-ribbon-card--mini .premiere-ribbon-poster {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+.premiere-ribbon-card--mini .premiere-ribbon-poster-img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.premiere-ribbon-rating {
+  position: absolute; top: 0.35rem; right: 0.35rem;
+  background: rgba(0,0,0,0.65); color: #ffd54a;
+  font-size: 0.72rem; font-weight: 700;
+  padding: 0.15rem 0.4rem; border-radius: var(--radius-pill);
+}
+.premiere-ribbon-rating--site { top: 1.95rem; color: #2ecc71; }
+.premiere-ribbon-typebadge {
+  position: absolute; bottom: 0.35rem; left: 0.35rem;
+  background: rgba(0,0,0,0.65); color: #fff;
+  font-size: 0.68rem; padding: 0.12rem 0.4rem; border-radius: var(--radius-sm);
+}
+.premiere-ribbon-card--mini .premiere-ribbon-body { padding: 0.4rem 0.1rem 0; }
+.premiere-ribbon-card--mini .premiere-ribbon-card-title {
+  font-size: 0.82rem; line-height: 1.25; margin: 0 0 0.15rem;
+  min-height: 2.5em;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.premiere-ribbon-card--mini .premiere-ribbon-meta {
+  font-size: 0.72rem; color: var(--text-muted); margin: 0;
+}
+
+/* Намёк на прокрутку: тонкая полоса всегда видна */
+.premiere-ribbon-progress { opacity: 1 !important; }
+
+/* На широких экранах — плитки чуть крупнее, видно ~5 */
+@media (min-width: 760px) {
+  body.app-mode .premiere-ribbon-card,
+  .premiere-ribbon-card--mini {
+    flex-basis: 18% !important; width: 18% !important;
+    min-width: 18% !important; max-width: 18% !important;
+  }
+}
+
+/* ===================================================================
+   БИТВА ФИЛЬМОВ — на телефоне два фильма РЯДОМ (а не столбцом)
+   =================================================================== */
+@media (max-width: 1024px) {
+  .battle-arena {
+    grid-template-columns: 1fr auto 1fr !important;
+    gap: 0.45rem !important;
+    align-items: stretch;
+  }
+  .battle-card--left,
+  .battle-card--right {
+    max-width: none !important;
+    width: auto !important;
+    margin: 0 !important;
+  }
+  .battle-vs {
+    width: auto !important;
+    padding: 0 0.1rem !important;
+    font-size: 0.95rem !important;
+  }
+}
+
+/* Очень узкие экраны: ужимаем содержимое карточек, но оставляем рядом */
+@media (max-width: 440px) {
+  .battle-card-title { font-size: 0.9rem; }
+  .battle-card-body { padding: 0.5rem; }
+  .battle-vs { font-size: 0.8rem; }
+}
+
+/* ── Уведомление для гостей в тестах: «результат не сохранится» ── */
+.psych-guest-notice {
+  margin: 0.6rem 0 0.4rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 12px;
+  background: rgba(255, 196, 0, 0.12);
+  border: 1px solid rgba(255, 196, 0, 0.35);
+  color: #b8860b;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+.psych-inline-login {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #1769ff;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ── Карточки рекомендаций в чате на узких экранах / PWA ─────────── */
+@media (max-width: 600px) {
+  .chat-rec-poster {
+    flex-basis: 56px;
+    width: 56px;
+    height: 84px;
+  }
+  .chat-rec-btn {
+    flex: 1 1 auto;
+    text-align: center;
+    padding: 0.45rem 0.5rem;
+    font-size: 0.74rem;
+  }
+  .chat-rec-actions {
+    gap: 0.3rem;
+  }
+}

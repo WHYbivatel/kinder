@@ -1,8 +1,8 @@
 /* ===================================================================
-   appShell.css — интерфейс «как в мобильном приложении» для PWA / телефона.
-   Активируется только когда на <body> есть класс .app-mode
-   (его ставит appShell.js в standalone-PWA или на узком/мобильном экране).
-   На обычном ПК-браузере эти стили не применяются — десктоп не меняется.
+   appShell.css — единый интерфейс «как в мобильном приложении».
+   Активируется когда на <body> есть класс .app-mode
+   (appShell.js ставит его ВСЕГДА — и на ПК, и на телефоне).
+   Дизайн единый для всех устройств, независимо от ширины экрана.
    Чтобы откатить: удалить подключение этого файла из *.html и сам файл.
    =================================================================== */
 
@@ -27,6 +27,52 @@ body.app-mode .chat-toggle-btn--fixed {
   display: none !important;
 }
 
+/* Стрелки ленты премьер в app-режиме (телефон/PWA) не нужны — листаем свайпом */
+body.app-mode .premiere-ribbon-nav {
+  display: none !important;
+}
+
+/* Лента премьер на телефоне/в PWA: ровно одна премьера за раз, во всю
+   ширину области, без «выглядывания» соседних слайдов. Листаем свайпом.
+   ВАЖНО: у скролл-вьюпорта нет горизонтального padding — иначе карточка
+   шириной 100% уже области, и в боковом padding виден край соседнего фильма. */
+body.app-mode .premiere-ribbon-viewport {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+body.app-mode .premiere-ribbon-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+body.app-mode .premiere-ribbon-track {
+  gap: 0;
+  transition: none;
+  transform: none !important;
+}
+
+/* Каждая плитка = один фильм на экране, по центру, с одинаковым небольшим
+   отступом от краёв экрана (по 0.75rem). Сосед полностью за краем — без peek.
+   Боковые margin'ы входят в «слот» так, что один слот = ровно ширина области
+   (gap у трека = 0), поэтому листание остаётся «по одному фильму». */
+body.app-mode .premiere-ribbon-card {
+  flex: 0 0 calc(100% - 1.5rem) !important;
+  width: calc(100% - 1.5rem) !important;
+  min-width: calc(100% - 1.5rem) !important;
+  max-width: calc(100% - 1.5rem) !important;
+  margin: 0 0.75rem !important;
+  scroll-snap-align: center;
+}
+
 /* ── Нижняя панель вкладок ───────────────────────────────────────── */
 .app-tabbar {
   position: fixed;
@@ -35,9 +81,10 @@ body.app-mode .chat-toggle-btn--fixed {
   transform: translateX(-50%);
   z-index: calc(var(--z-header) + 30);
   display: none;
-  grid-template-columns: repeat(5, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 0.15rem;
-  width: min(520px, calc(100vw - 1.25rem));
+  width: min(600px, calc(100vw - 1rem));
   padding: 0.4rem 0.45rem;
   border: 1px solid var(--border-default);
   border-radius: 22px;
@@ -73,8 +120,16 @@ body.app-mode .app-tabbar {
 }
 
 .app-tab__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 1.15rem;
   line-height: 1;
+}
+
+.app-tab__icon svg {
+  width: 22px;
+  height: 22px;
 }
 
 .app-tab__label {
@@ -115,6 +170,15 @@ body.app-mode .main-content {
   padding-right: 1rem;
 }
 
+/* В app-режиме секции идут одной колонкой (экраны переключаются по одному) */
+body.app-mode .home-grid {
+  display: block;
+}
+
+body.app-mode .home-grid > .content-section {
+  margin-top: var(--section-gap);
+}
+
 /* ── Экран AI (чат на всю область) ───────────────────────────────── */
 body.app-mode[data-app-screen="ai"] #chat-panel {
   display: flex !important;
@@ -141,51 +205,159 @@ body.app-mode #chat-close {
   display: none !important;
 }
 
-/* ── Лента премьер: свайп пальцем ────────────────────────────────── */
-/* На десктопе viewport имеет overflow:hidden (листается стрелками).
-   В app-режиме включаем нативную горизонтальную прокрутку касанием. */
-body.app-mode .premiere-ribbon-viewport {
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  scroll-snap-type: x proximity;
-  scroll-behavior: smooth;
-  padding: 0 1rem 0.4rem;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+/* ===================================================================
+   Свайп-лента — точь-в-точь как экран «Свайп» в мобильном приложении:
+   карточка занимает весь экран, постер тянется, инфо-блок снизу,
+   а действия — две круглые кнопки: крестик (пропустить) и сердце (в список).
+   =================================================================== */
+body.app-mode #discover-section {
+  margin-top: 0;
 }
 
-body.app-mode .premiere-ribbon-viewport::-webkit-scrollbar {
+body.app-mode .discover-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  height: calc(
+    100dvh - var(--header-height, 56px) - var(--app-tabbar-h) - var(--app-tabbar-gap) - 1.4rem
+  );
+  min-height: 420px;
+}
+
+/* Заголовок компактный; лишний текст прячем, чтобы карточке было больше места */
+body.app-mode .discover-head,
+body.app-mode .discover-tabs,
+body.app-mode .discover-actions,
+body.app-mode .discover-status {
+  flex: 0 0 auto;
+}
+/* Компактная верхняя панель: заголовок + «Обновить» в одну тонкую строку. */
+body.app-mode .discover-head {
+  display: flex;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+body.app-mode .discover-head > div { text-align: left; }
+body.app-mode .discover-head .rec-refresh-btn { width: auto !important; }
+body.app-mode .discover-eyebrow {
   display: none;
 }
-
-body.app-mode .premiere-ribbon-track {
-  /* убираем transform-переход — двигаем нативным скроллом */
-  transition: none;
+body.app-mode #discover-title {
+  font-size: 1rem;
+  margin: 0;
+  line-height: 1.15;
 }
-
-body.app-mode .premiere-ribbon-card {
-  scroll-snap-align: start;
+body.app-mode #discover-refresh {
+  padding: 0.32rem 0.7rem;
+  font-size: 0.8rem;
+  flex: 0 0 auto;
 }
-
-/* Стрелки навигации по премьерам на телефоне не нужны — есть свайп */
-@media (pointer: coarse) {
-  body.app-mode .premiere-ribbon-nav {
-    display: none;
-  }
-}
-
-/* ── Свайп-лента: компактно, как в приложении ───────────────────── */
-/* Убираем большой пустой блок под стопкой, чтобы карточка и кнопки
-   «Хочу / Пропустить» помещались на экране без прокрутки. */
-body.app-mode .discover-stack {
+/* Статус — тонкая строка под кнопками, без лишней высоты. */
+body.app-mode .discover-status {
+  font-size: 0.78rem;
+  margin: 0.25rem 0 0;
   min-height: 0;
-  margin-bottom: 0.5rem;
+  text-align: center;
 }
 
-/* Кнопки лайк/пропуск всегда поверх и кликабельны */
+/* Колода тянется на всё свободное место, карточка заполняет её целиком */
+body.app-mode .discover-stack {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  display: block;
+  position: relative;
+  overflow: hidden;
+  border-radius: 24px;
+}
+
+body.app-mode .discover-card,
+body.app-mode .discover-card--top,
+body.app-mode .discover-card--behind {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Постер забирает всё свободное место карточки (как в приложении) */
+body.app-mode .discover-poster {
+  flex: 1 1 auto;
+  min-height: 0;
+  aspect-ratio: auto;
+  max-height: none;
+}
+
+/* Инфо-блок прижат к низу карточки: название и год всегда видны полностью */
+body.app-mode .discover-card-info {
+  flex: 0 0 auto;
+}
+
+body.app-mode .discover-status {
+  min-height: 0;
+  margin: 0.2rem 0 0;
+}
+
+/* ── Кнопки действий: круглые крестик и сердце ──────────────────── */
 body.app-mode .discover-actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 1.6rem;
+  margin: 0.35rem 0 0;
   position: relative;
   z-index: 4;
-  margin-top: 0.5rem;
+}
+
+body.app-mode .discover-action {
+  width: 48px;
+  height: 48px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 50%;
+  border-width: 2px;
+  border-style: solid;
+  font-size: 0;
+  line-height: 0;
+  color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 22px 22px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  transition: transform 0.12s ease;
+}
+
+body.app-mode .discover-action--skip {
+  border-color: #e50914;
+  background-color: #2a1218;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e50914' stroke-width='2.6' stroke-linecap='round'><line x1='6' y1='6' x2='18' y2='18'/><line x1='18' y1='6' x2='6' y2='18'/></svg>");
+}
+
+body.app-mode .discover-action--watched {
+  border-color: rgba(255, 255, 255, 0.45);
+  background-color: rgba(255, 255, 255, 0.08);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d1d5db' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/><circle cx='12' cy='12' r='3'/></svg>");
+}
+
+body.app-mode .discover-action--like {
+  border-color: #22c55e;
+  background-color: #122819;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2322c55e'><path d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'/></svg>");
+}
+
+body.app-mode .discover-action:active {
+  transform: scale(0.9);
+}
+
+body.app-mode .discover-action:disabled {
+  opacity: 0.4;
 }

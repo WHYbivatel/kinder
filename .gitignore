@@ -3,5 +3,8 @@ node_modules/
 data/
 .expo/
 *.log
+*.bak
 _backup/
 mobile/
+cloudflared.exe
+*.exe

@@ -1,11 +1,10 @@
 /* ===================================================================
-   appShell.js — «приложение-режим» для PWA / телефона.
+   appShell.js — единый «приложение-режим» для всех устройств.
 
-   Идея: на ПК-браузере сайт остаётся прежним. В установленной PWA
-   (display-mode: standalone) или на узком/мобильном экране включается
-   class="app-mode" на <body>, появляется нижняя панель вкладок и
-   контент показывается по одному «экрану» за раз — как в мобильном
-   приложении.
+   Идея: class="app-mode" на <body> включается ВСЕГДА — и на ПК,
+   и на телефоне. Появляется нижняя панель вкладок и контент
+   показывается по одному «экрану» за раз — как в мобильном
+   приложении. Единый дизайн везде, чтобы не путаться.
 
    Реализация безопасная и аддитивная: исходные секции остаются в DOM,
    мы лишь переключаем их inline-видимость. Существующий JS не меняется.
@@ -19,16 +18,30 @@
   var FORCE_KEY = 'appShellForce'; // '1' — всегда вкл, '0' — всегда выкл (для теста на ПК)
 
   // Вкладки нижней панели (порядок = порядок в панели)
+  var ICONS = {
+    home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"/><path d="M9.5 21v-6h5v6"/></svg>',
+    catalog: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+    tests: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6"/><path d="M10 3v6.2L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 9.2V3"/><path d="M7.5 14h9"/></svg>',
+    discover: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12.6 12 20l-7.5-7.4a4.7 4.7 0 0 1 0-6.7 4.7 4.7 0 0 1 6.7 0l.8.8.8-.8a4.7 4.7 0 0 1 6.7 0 4.7 4.7 0 0 1 0 6.7Z"/></svg>',
+    ai: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5Z"/></svg>',
+    list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h12"/><path d="M8 12h12"/><path d="M8 18h12"/><circle cx="3.5" cy="6" r="1.2"/><circle cx="3.5" cy="12" r="1.2"/><circle cx="3.5" cy="18" r="1.2"/></svg>'
+  };
+
+  function tt(key, fallback) {
+    return (typeof window !== 'undefined' && window.t) ? window.t(key) : fallback;
+  }
+
   var TABS = [
-    { id: 'home',     icon: '🏠', label: 'Главная',  href: '/#home' },
-    { id: 'tests',    icon: '🧪', label: 'Тесты',    href: '/#tests' },
-    { id: 'discover', icon: '💕', label: 'Свайп',    href: '/#discover' },
-    { id: 'ai',       icon: '💬', label: 'AI',       href: '/#ai' },
-    { id: 'list',     icon: '📋', label: 'Список',   href: '/#list' }
+    { id: 'home',     icon: ICONS.home,     labelKey: 'nav.home',     label: 'Главная',  href: '/#home' },
+    { id: 'catalog',  icon: ICONS.catalog,  labelKey: 'nav.catalog',  label: 'Каталог',  href: '/#catalog' },
+    { id: 'discover', icon: ICONS.discover, labelKey: 'nav.swipe',    label: 'Свайп',    href: '/#discover' },
+    { id: 'tests',    icon: ICONS.tests,    labelKey: 'nav.tests',    label: 'Тесты',    href: '/#tests' },
+    { id: 'ai',       icon: ICONS.ai,       labelKey: 'nav.ai',       label: 'AI',       href: '/#ai' },
+    { id: 'list',     icon: ICONS.list,     labelKey: 'nav.listShort', label: 'Список',   href: '/#list' }
   ];
 
   // Экраны, между которыми переключаемся на главной странице
-  var SCREENS = ['home', 'tests', 'discover', 'list', 'ai'];
+  var SCREENS = ['home', 'catalog', 'tests', 'discover', 'list', 'ai'];
 
   // Привязка секций главной страницы к экранам (селектор → экран).
   // Чат (#chat-panel) показывается на экране 'ai' через CSS, отдельно.
@@ -36,13 +49,12 @@
     ['#premiere-ribbon-section', 'home'],
     ['.hero-section', 'home'],
     ['#battle-section', 'home'],
-    ['#recommendations-box', 'home'],
+    ['#home-collections', 'home'],
     ['.collections-section', 'home'],
-    ['.premiere-suggest-section', 'home'],
 
-    ['#psych-test-section', 'tests'],
-    ['#visual-test-section', 'tests'],
-    ['#short-visual-tests-section', 'tests'],
+    ['#catalog-section', 'catalog'],
+
+    ['#tests-ribbon-wrap', 'tests'],
 
     ['#discover-section', 'discover'],
 
@@ -75,10 +87,9 @@
   }
 
   function shouldBeApp() {
-    var force = readForce();
-    if (force === '1') return true;
-    if (force === '0') return false;
-    return isStandalone() || isMobileLike();
+    // Единый дизайн: app-режим включён всегда — и на ПК, и на телефоне,
+    // независимо от ширины окна и standalone-режима.
+    return true;
   }
 
   function safeStore(key, val) {
@@ -108,7 +119,7 @@
     var nav = document.createElement('nav');
     nav.id = 'app-tabbar';
     nav.className = 'app-tabbar';
-    nav.setAttribute('aria-label', 'Вкладки приложения');
+    nav.setAttribute('aria-label', tt('nav.tabsAria', 'Вкладки приложения'));
 
     TABS.forEach(function (tab) {
       var a = document.createElement('a');
@@ -117,7 +128,7 @@
       a.dataset.tab = tab.id;
       a.innerHTML =
         '<span class="app-tab__icon" aria-hidden="true">' + tab.icon + '</span>' +
-        '<span class="app-tab__label">' + tab.label + '</span>';
+        '<span class="app-tab__label">' + tt(tab.labelKey, tab.label) + '</span>';
 
       if (isHomePage && !tab.link) {
         a.addEventListener('click', function (e) {
@@ -135,6 +146,20 @@
     tabbarEl = nav;
     return nav;
   }
+
+  // Перевод подписей вкладок при смене языка.
+  function relabelTabs() {
+    if (!tabbarEl) return;
+    tabbarEl.setAttribute('aria-label', tt('nav.tabsAria', 'Вкладки приложения'));
+    var items = tabbarEl.querySelectorAll('.app-tab');
+    for (var i = 0; i < items.length; i++) {
+      var labelEl = items[i].querySelector('.app-tab__label');
+      var id = items[i].dataset.tab;
+      var tab = TABS.filter(function (t) { return t.id === id; })[0];
+      if (labelEl && tab) labelEl.textContent = tt(tab.labelKey, tab.label);
+    }
+  }
+  document.addEventListener('i18n:change', relabelTabs);
 
   function setActiveTab(id) {
     if (!tabbarEl) return;
@@ -173,6 +198,12 @@
     window.requestAnimationFrame(function () {
       try { window.dispatchEvent(new Event('resize')); } catch (e) {}
       if (screen === 'discover') ensureDiscoverLoaded();
+      if (screen === 'catalog' && window.CatalogUI && typeof window.CatalogUI.refresh === 'function') {
+        window.CatalogUI.refresh();
+      }
+      if (screen === 'home' && window.HomeCollections && typeof window.HomeCollections.refresh === 'function') {
+        window.HomeCollections.refresh();
+      }
     });
   }
 
@@ -187,10 +218,10 @@
   }
 
   function initialScreen() {
+    // Уважаем явный hash в URL (deep-link), но при обычном запуске всегда
+    // открываемся на «Главной», а не на последнем посещённом экране.
     var hash = (window.location.hash || '').replace('#', '');
     if (SCREENS.indexOf(hash) !== -1) return hash;
-    var stored = safeRead(STORAGE_KEY);
-    if (SCREENS.indexOf(stored) !== -1) return stored;
     return 'home';
   }
 

@@ -5,38 +5,127 @@
   const refreshBtn = document.getElementById('discover-refresh');
   const likeBtn = document.getElementById('discover-like');
   const skipBtn = document.getElementById('discover-skip');
+  const watchedBtn = document.getElementById('discover-watched');
   const statusEl = document.getElementById('discover-status');
-  const hintEl = document.getElementById('discover-hint');
 
-  const BATCH_SIZE = 10;
-  const SWIPE_THRESHOLD = 96;
-  const feeds = {
-    movie: { label: 'Подборка фильмов', mediaType: 'movie' },
-    tv: { label: 'Подборка сериалов', mediaType: 'tv' },
-    animation: { label: 'Анимационные и мультсериалы', mediaType: 'tv', category: 'animation' }
-  };
+  const BATCH_SIZE = 12;
+  const SWIPE_THRESHOLD = 90;
+  const TAP_THRESHOLD = 8;
+
+  // Единая смешанная лента: фильмы, сериалы и мультфильмы вместе.
   const localRecommendations = [
-    { title: 'Интерстеллар', originalTitle: 'Interstellar', mediaType: 'movie', reason: 'Большая научная фантастика', genres: ['Фантастика', 'Драма'] },
-    { title: 'Начало', originalTitle: 'Inception', mediaType: 'movie', reason: 'Умный триллер с сильной идеей', genres: ['Фантастика', 'Триллер'] },
-    { title: 'Матрица', originalTitle: 'The Matrix', mediaType: 'movie', reason: 'Классика фантастики и экшена', genres: ['Фантастика', 'Экшен'] },
-    { title: 'Достать ножи', originalTitle: 'Knives Out', mediaType: 'movie', reason: 'Легкий и умный детектив', genres: ['Детектив', 'Комедия'] },
-    { title: 'Одержимость', originalTitle: 'Whiplash', mediaType: 'movie', reason: 'Напряженная история про амбиции', genres: ['Драма', 'Музыка'] },
-    { title: 'Дюна', originalTitle: 'Dune', mediaType: 'movie', reason: 'Эпичная фантастика с сильной атмосферой', genres: ['Фантастика', 'Приключения'] },
-    { title: 'Во все тяжкие', originalTitle: 'Breaking Bad', mediaType: 'tv', reason: 'Сильная криминальная драма', genres: ['Криминал', 'Драма'] },
-    { title: 'Чернобыль', originalTitle: 'Chernobyl', mediaType: 'tv', reason: 'Мини-сериал с мощной драматургией', genres: ['Драма', 'История'] },
-    { title: 'Настоящий детектив', originalTitle: 'True Detective', mediaType: 'tv', reason: 'Атмосферный криминальный сериал', genres: ['Криминал', 'Детектив'] },
-    { title: 'Тьма', originalTitle: 'Dark', mediaType: 'tv', reason: 'Сложная фантастическая загадка', genres: ['Фантастика', 'Драма'] },
-    { title: 'Аркейн', originalTitle: 'Arcane', mediaType: 'tv', reason: 'Сильная анимационная драма', genres: ['Анимация', 'Драма'] },
-    { title: 'Рик и Морти', originalTitle: 'Rick and Morty', mediaType: 'tv', reason: 'Научная фантастика и черный юмор', genres: ['Анимация', 'Комедия'] },
-    { title: 'Гравити Фолз', originalTitle: 'Gravity Falls', mediaType: 'tv', reason: 'Мистика и юмор для всей семьи', genres: ['Анимация', 'Приключения'] },
-    { title: 'Аватар: Легенда об Аанге', originalTitle: 'Avatar: The Last Airbender', mediaType: 'tv', reason: 'Культовый мультсериал с приключениями', genres: ['Анимация', 'Фэнтези'] }
+    { title: 'Интерстеллар', originalTitle: 'Interstellar', mediaType: 'movie', tmdbId: 157336, genres: ['Фантастика', 'Драма'], year: 2014 },
+    { title: 'Начало', originalTitle: 'Inception', mediaType: 'movie', tmdbId: 27205, genres: ['Фантастика', 'Триллер'], year: 2010 },
+    { title: 'Матрица', originalTitle: 'The Matrix', mediaType: 'movie', tmdbId: 603, genres: ['Фантастика', 'Боевик'], year: 1999 },
+    { title: 'Достать ножи', originalTitle: 'Knives Out', mediaType: 'movie', tmdbId: 546554, genres: ['Детектив', 'Комедия'], year: 2019 },
+    { title: 'Дюна', originalTitle: 'Dune', mediaType: 'movie', tmdbId: 438631, genres: ['Фантастика', 'Приключения'], year: 2021 },
+    { title: 'Во все тяжкие', originalTitle: 'Breaking Bad', mediaType: 'tv', tmdbId: 1396, genres: ['Криминал', 'Драма'], year: 2008 },
+    { title: 'Чернобыль', originalTitle: 'Chernobyl', mediaType: 'tv', tmdbId: 87108, genres: ['Драма', 'История'], year: 2019 },
+    { title: 'Тьма', originalTitle: 'Dark', mediaType: 'tv', tmdbId: 70523, genres: ['Фантастика', 'Драма'], year: 2017 },
+    { title: 'Аркейн', originalTitle: 'Arcane', mediaType: 'tv', tmdbId: 94605, genres: ['Анимация', 'Драма'], year: 2021 },
+    { title: 'Рик и Морти', originalTitle: 'Rick and Morty', mediaType: 'tv', tmdbId: 60625, genres: ['Анимация', 'Комедия'], year: 2013 }
   ];
 
-  let activeFeed = 'movie';
   let items = [];
   let index = 0;
   let loading = false;
   let pointerState = null;
+
+  // Карточки, которые пользователь уже видел/свайпал, запоминаем между
+  // обновлениями и сессиями — чтобы кнопка «Обновить» приносила новые фильмы,
+  // а не тот же набор.
+  // Храним записи вида "<ключ>::<нормализованный заголовок>", чтобы знать
+  // и ключ (для локальной дедупликации), и название (для исключения на сервере).
+  const SEEN_STORAGE_KEY = 'discoverSeenKeysV1';
+  const SEEN_LIMIT = 400;
+  let seenEntries = loadSeenEntries();
+
+  function loadSeenEntries() {
+    try {
+      const raw = localStorage.getItem(SEEN_STORAGE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  function persistSeenEntries() {
+    try {
+      const arr = [...seenEntries].slice(-SEEN_LIMIT);
+      seenEntries = new Set(arr);
+      localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(arr));
+    } catch { /* localStorage может быть недоступен — не критично */ }
+  }
+
+  function seenEntry(item) {
+    return `${recommendationKey(item)}::${normalizeTitle(item.title || item.originalTitle)}`;
+  }
+
+  function markSeen(item) {
+    if (!item) return;
+    seenEntries.add(seenEntry(item));
+    persistSeenEntries();
+  }
+
+  function resetSeen() {
+    seenEntries = new Set();
+    try { localStorage.removeItem(SEEN_STORAGE_KEY); } catch { /* ignore */ }
+  }
+
+  function isSeen(item) {
+    return seenEntries.has(seenEntry(item)) || seenKeySet().has(recommendationKey(item));
+  }
+
+  function seenKeySet() {
+    const keys = new Set();
+    seenEntries.forEach((entry) => keys.add(entry.split('::')[0]));
+    return keys;
+  }
+
+  // ── Сессионный профиль вкуса свайпов ───────────────────────────────
+  // Живёт только в текущей сессии. Свайп вправо усиливает похожие признаки
+  // в дальнейшей выдаче, свайп влево — понижает. Отправляется на сервер,
+  // который адаптирует ленту прямо во время листания.
+  const SWIPE_SESSION_MAX = 14;
+  const swipeSession = { right: [], left: [], boostGenres: {}, penalizeGenres: {} };
+  let adaptInFlight = false;
+  let adaptQueued = false;
+
+  function sessionItem(item) {
+    return {
+      tmdbId: item.tmdbId || null,
+      mediaType: item.mediaType || 'movie',
+      title: item.title || item.originalTitle || '',
+      genres: item.genres || []
+    };
+  }
+
+  function recordSwipeSignal(item, dir) {
+    if (!item) return;
+    const entry = sessionItem(item);
+    const arr = dir === 'right' ? swipeSession.right : swipeSession.left;
+    arr.push(entry);
+    if (arr.length > SWIPE_SESSION_MAX) arr.splice(0, arr.length - SWIPE_SESSION_MAX);
+    const target = dir === 'right' ? swipeSession.boostGenres : swipeSession.penalizeGenres;
+    (entry.genres || []).forEach((g) => {
+      const key = String(g).toLowerCase();
+      target[key] = (target[key] || 0) + 1;
+    });
+  }
+
+  function hasSwipeSession() {
+    return swipeSession.right.length > 0 || swipeSession.left.length > 0;
+  }
+
+  function sessionPayload() {
+    return {
+      right: swipeSession.right.slice(-SWIPE_SESSION_MAX),
+      left: swipeSession.left.slice(-SWIPE_SESSION_MAX),
+      boostGenres: swipeSession.boostGenres,
+      penalizeGenres: swipeSession.penalizeGenres
+    };
+  }
 
   function esc(text) {
     return window.MovieDisplay?.escapeHtml(text) || String(text || '');
@@ -46,22 +135,18 @@
     return String(title || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
   }
 
-  function isAnimationItem(item) {
-    if ((item.mediaType || 'movie') !== 'tv') return false;
-    const haystack = `${item.title || ''} ${(item.genres || []).join(' ')}`;
-    return /анимац|мульт|animation|cartoon/i.test(haystack);
-  }
-
-  function matchesFeed(item, feed) {
-    const mediaType = item.mediaType || 'movie';
-    if (feed === 'movie') return mediaType === 'movie';
-    if (feed === 'animation') return isAnimationItem(item);
-    return mediaType === 'tv' && !isAnimationItem(item);
-  }
-
   function recommendationKey(item) {
     if (item.tmdbId) return `${item.mediaType || 'movie'}:tmdb:${item.tmdbId}`;
     return `${item.mediaType || 'movie'}:title:${normalizeTitle(item.title || item.originalTitle)}`;
+  }
+
+  function seenTitles() {
+    const titles = [];
+    seenEntries.forEach((entry) => {
+      const title = entry.split('::')[1];
+      if (title) titles.push(title);
+    });
+    return titles;
   }
 
   function existingTitles() {
@@ -81,15 +166,12 @@
     const picked = [];
     localRecommendations.forEach((item) => {
       if (picked.length >= limit) return;
-      if (!matchesFeed(item, activeFeed)) return;
-      if (blockedTitles.has(normalizeTitle(item.title)) || blockedTitles.has(normalizeTitle(item.originalTitle))) return;
+      if (blockedTitles.has(normalizeTitle(item.title))) return;
+      if (isSeen(item)) return;
       const key = recommendationKey(item);
       if (knownKeys.has(key)) return;
       knownKeys.add(key);
-      picked.push({
-        ...item,
-        whyDetailed: item.whyDetailed || 'Локальная рекомендация добавлена, чтобы свайп-лента продолжала работать даже без AI.'
-      });
+      picked.push(item);
     });
     return picked;
   }
@@ -106,8 +188,7 @@
       refreshBtn.disabled = next;
       refreshBtn.textContent = next ? 'Загрузка...' : 'Обновить';
     }
-    if (likeBtn) likeBtn.disabled = next || !items[index];
-    if (skipBtn) skipBtn.disabled = next || !items[index];
+    [likeBtn, skipBtn, watchedBtn].forEach((btn) => { if (btn) btn.disabled = next || !items[index]; });
   }
 
   function posterSrc(item) {
@@ -115,20 +196,25 @@
   }
 
   function mediaLabel(item) {
-    if (isAnimationItem(item)) return 'Мультсериал';
-    return item.mediaType === 'tv' ? 'Сериал' : 'Фильм';
+    const mt = item.mediaType || 'movie';
+    const tt = (k, f) => (window.t ? window.t(k) : f);
+    const isAnim = mt === 'tv' && /анимац|мульт|animation|cartoon/i.test(`${item.title} ${(item.genres || []).join(' ')}`);
+    if (isAnim) return tt('media.animation', 'Мультфильм');
+    return mt === 'tv' ? tt('media.series', 'Сериал') : tt('media.movie', 'Фильм');
   }
 
-  function formatRuntime(minutes) {
-    if (!minutes) return '';
-    if (minutes >= 60) {
-      const hours = Math.floor(minutes / 60);
-      const rest = minutes % 60;
-      return rest ? `${hours} ч ${rest} мин` : `${hours} ч`;
-    }
-    return `${minutes} мин`;
+  function ratingValue(item) {
+    const r = item.voteAverage || item.rating || null;
+    return r ? Number(r).toFixed(1) : null;
   }
 
+  function movieHref(item) {
+    if (!item.tmdbId) return null;
+    return `/movie.html?type=${item.mediaType === 'tv' ? 'tv' : 'movie'}&id=${item.tmdbId}`;
+  }
+
+  // Минимальная карточка: постер, название, жанр+год, рейтинг. Остальное —
+  // на странице фильма (открывается по тапу).
   function renderCard(item, offset) {
     const card = document.createElement('article');
     card.className = `discover-card${offset === 0 ? ' discover-card--top' : ' discover-card--behind'}`;
@@ -136,41 +222,36 @@
     card.dataset.index = String(index + offset);
 
     const poster = posterSrc(item);
-    const year = item.year || item.releaseDate?.slice(0, 4) || '';
-    const meta = [year, item.director, formatRuntime(item.runtime), mediaLabel(item)].filter(Boolean).join(' · ');
-    const genres = (item.genres || []).slice(0, 4);
-    const description = item.overview || item.whyDetailed || item.reason || '';
+    const year = item.year
+      || item.releaseDate?.slice(0, 4)
+      || item.release_date?.slice(0, 4)
+      || item.firstAirDate?.slice(0, 4)
+      || item.first_air_date?.slice(0, 4)
+      || item.meta?.year
+      || '';
+    const genre = (item.genres || [])[0] || '';
+    const metaParts = [year, genre, mediaLabel(item)].filter(Boolean);
+    const rating = ratingValue(item);
+    const site = item.siteRating?.average
+      ? `<span class="discover-rating discover-rating--site" title="Оценка пользователей сайта (${item.siteRating.count})">★ ${esc(String(item.siteRating.average))} <small>сайт</small></span>`
+      : '';
 
     card.innerHTML = `
       <div class="discover-badge discover-badge--like">Хочу</div>
-      <div class="discover-badge discover-badge--skip">Пропуск</div>
+      <div class="discover-badge discover-badge--skip">Мимо</div>
       <div class="discover-poster ${poster ? '' : 'discover-poster--empty'}">
-        ${poster ? `<img src="${esc(poster)}" alt="${esc(item.title)}" loading="lazy" decoding="async">` : '<span>🎬</span>'}
+        ${poster ? `<div class="discover-poster-bg" style="background-image:url('${esc(poster)}')"></div>` : ''}
+        ${poster ? `<img src="${esc(poster)}" alt="${esc(item.title)}" loading="lazy" decoding="async" draggable="false">` : '<span>🎬</span>'}
+        ${rating ? `<span class="discover-rating">★ ${esc(rating)}</span>` : ''}
+        ${site}
       </div>
       <div class="discover-card-info">
-        <div class="discover-card-title-row">
-          <h3>${esc(item.title)}</h3>
-          ${isAlreadySaved(item) ? '<span class="discover-saved-pill">В списке</span>' : ''}
-        </div>
-        ${window.MovieDisplay?.formatOriginalTitleHtml(item.originalTitle, item.title, 'discover-original-title') || ''}
-        ${meta ? `<p class="discover-meta">${esc(meta)}</p>` : ''}
-        ${genres.length ? `<div class="discover-genres">${genres.map((genre) => `<span>${esc(genre)}</span>`).join('')}</div>` : ''}
-        ${item.reason ? `<p class="discover-reason">${esc(item.reason)}</p>` : ''}
-        ${description ? `<button type="button" class="discover-desc-btn">Описание</button>` : ''}
+        <h3 class="discover-card-title">${esc(item.title)}</h3>
+        <p class="discover-card-meta">${esc(metaParts.join(' · ')) || mediaLabel(item)}</p>
       </div>
     `;
 
-    const descBtn = card.querySelector('.discover-desc-btn');
-    descBtn?.addEventListener('click', (event) => {
-      event.stopPropagation();
-      window.openModal?.(item.title, `
-        ${item.reason ? `<h4>Почему в подборке</h4><p>${esc(item.reason)}</p>` : ''}
-        ${item.whyDetailed && item.whyDetailed !== item.reason ? `<h4>Подробнее</h4><p>${esc(item.whyDetailed)}</p>` : ''}
-        ${item.overview ? `<h4>Сюжет</h4><p>${esc(item.overview)}</p>` : ''}
-      `);
-    });
-
-    if (offset === 0) attachSwipe(card);
+    if (offset === 0) attachSwipe(card, item);
     return card;
   }
 
@@ -180,8 +261,8 @@
     if (!visible.length) {
       stack.innerHTML = `
         <div class="discover-empty">
-          <strong>Карточки закончились</strong>
-          <span>Нажмите «Обновить», чтобы получить новую пачку рекомендаций.</span>
+          <strong>${window.t ? window.t('discover.emptyTitle') : 'Карточки закончились'}</strong>
+          <span>${window.t ? window.t('discover.emptyHint') : 'Нажмите «Обновить», чтобы получить новую пачку рекомендаций.'}</span>
         </div>
       `;
       setLoading(false);
@@ -195,15 +276,10 @@
     setLoading(false);
   }
 
-  function attachSwipe(card) {
+  function attachSwipe(card, item) {
     card.addEventListener('pointerdown', (event) => {
       if (loading) return;
-      pointerState = {
-        startX: event.clientX,
-        startY: event.clientY,
-        x: 0,
-        pointerId: event.pointerId
-      };
+      pointerState = { startX: event.clientX, startY: event.clientY, x: 0, y: 0, pointerId: event.pointerId };
       card.setPointerCapture(event.pointerId);
       card.classList.add('discover-card--dragging');
     });
@@ -211,20 +287,21 @@
     card.addEventListener('pointermove', (event) => {
       if (!pointerState || pointerState.pointerId !== event.pointerId) return;
       pointerState.x = event.clientX - pointerState.startX;
-      const y = (event.clientY - pointerState.startY) * 0.12;
+      pointerState.y = event.clientY - pointerState.startY;
+      const y = pointerState.y * 0.12;
       const rotation = Math.max(-10, Math.min(10, pointerState.x / 14));
       card.style.transform = `translate(${pointerState.x}px, ${y}px) rotate(${rotation}deg)`;
       card.classList.toggle('discover-card--like', pointerState.x > SWIPE_THRESHOLD * 0.45);
       card.classList.toggle('discover-card--skip', pointerState.x < -SWIPE_THRESHOLD * 0.45);
     });
 
-    card.addEventListener('pointerup', (event) => finishPointer(card, event.pointerId));
-    card.addEventListener('pointercancel', (event) => finishPointer(card, event.pointerId, true));
+    card.addEventListener('pointerup', (event) => finishPointer(card, item, event.pointerId));
+    card.addEventListener('pointercancel', (event) => finishPointer(card, item, event.pointerId, true));
   }
 
-  function finishPointer(card, pointerId, cancelled = false) {
+  function finishPointer(card, item, pointerId, cancelled = false) {
     if (!pointerState || pointerState.pointerId !== pointerId) return;
-    const x = pointerState.x;
+    const { x, y } = pointerState;
     pointerState = null;
     card.classList.remove('discover-card--dragging');
 
@@ -232,6 +309,12 @@
       animateChoice('like');
     } else if (!cancelled && x < -SWIPE_THRESHOLD) {
       animateChoice('skip');
+    } else if (!cancelled && Math.abs(x) < TAP_THRESHOLD && Math.abs(y) < TAP_THRESHOLD) {
+      // Тап (не свайп) — открываем страницу фильма.
+      const href = movieHref(item);
+      if (href) { location.href = href; return; }
+      card.style.transform = '';
+      card.classList.remove('discover-card--like', 'discover-card--skip');
     } else {
       card.style.transform = '';
       card.classList.remove('discover-card--like', 'discover-card--skip');
@@ -242,14 +325,77 @@
     const card = stack.querySelector('.discover-card--top');
     if (!card || loading) return;
     setLoading(true);
-    card.classList.add(choice === 'like' ? 'discover-card--out-like' : 'discover-card--out-skip');
+    if (choice === 'skip') {
+      card.classList.add('discover-card--out-skip');
+    } else {
+      card.classList.add('discover-card--out-like');
+    }
     window.setTimeout(() => {
-      if (choice === 'like') {
-        addCurrent();
-      } else {
-        nextCard('Пропущено');
-      }
+      if (choice === 'like') applyChoice('like');
+      else if (choice === 'watched') applyChoice('watched');
+      else applyChoice('skip');
     }, 230);
+  }
+
+  // Глобальный счётчик реакций (все пользователи, в т.ч. гости).
+  // Сервер принимает like/dislike/watched, поэтому свайп «Мимо» (skip)
+  // отправляем как dislike — так левые свайпы тоже формируют соц. сигнал.
+  function recordGlobal(item, action) {
+    const globalAction = action === 'skip' ? 'dislike' : action;
+    fetch('/api/interactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...window.authHeaders() },
+      body: JSON.stringify({ tmdbId: item.tmdbId, mediaType: item.mediaType || 'movie', title: item.title, action: globalAction })
+    }).catch(() => undefined);
+  }
+
+  async function applyChoice(action) {
+    const item = items[index];
+    if (!item) { setLoading(false); return; }
+
+    // 0) Запоминаем карточку как «просмотренную» — больше не покажем её
+    //    при следующих обновлениях ленты.
+    markSeen(item);
+
+    // 1) Считаем реакцию глобально (лайк/дизлайк/смотрел).
+    recordGlobal(item, action);
+
+    // 1.5) Обновляем сессионный профиль вкуса свайпов и адаптируем ленту.
+    //      Вправо (Хочу/Посмотрел) — усиливаем похожее; влево (Мимо) — понижаем.
+    if (action === 'skip') {
+      recordSwipeSignal(item, 'left');
+      scheduleAdaptation();
+    } else {
+      recordSwipeSignal(item, 'right');
+      scheduleAdaptation();
+    }
+
+    // 2) skip — просто дальше.
+    if (action === 'skip') { nextCard('Мимо'); return; }
+
+    // 3) like/watched — добавляем в список. Гость тоже может добавлять:
+    //    список сохраняется локально и переносится в аккаунт после входа.
+    if (isAlreadySaved(item)) { nextCard('Уже есть в списке', 'success'); return; }
+
+    const status = action === 'watched' ? 'watched' : 'want';
+    try {
+      const result = await window.MovieApp.executeActions([{
+        type: 'add_movie',
+        title: item.title,
+        status,
+        mediaType: item.mediaType || 'movie',
+        tmdbId: item.tmdbId,
+        genres: item.genres || [],
+        meta: { poster: item.poster, year: item.year, overview: item.overview, originalTitle: item.originalTitle }
+      }]);
+      if (result?.[0]?.success) {
+        nextCard(`${status === 'watched' ? 'В «Посмотрел»' : 'В «Хочу»'}: ${item.title}`, 'success');
+        return;
+      }
+      nextCard(result?.[0]?.error || 'Не удалось добавить', 'error');
+    } catch (error) {
+      nextCard(error.message || 'Не удалось сохранить', 'error');
+    }
   }
 
   function nextCard(message, tone) {
@@ -261,76 +407,140 @@
     }
   }
 
-  async function addCurrent() {
-    const item = items[index];
-    if (!item) return;
-    if (isAlreadySaved(item)) {
-      nextCard('Уже есть в списке', 'success');
-      return;
+  // Язык для запросов (TMDB-названия/описания карточек приходят на нём).
+  function lang() {
+    return (window.I18N && window.I18N.tmdbLang) ? window.I18N.tmdbLang() : 'ru';
+  }
+
+  // Запрос ленты: основной путь — POST /api/discover/feed с сессионным
+  // профилем свайпов (адаптация в реальном времени). При ошибке — фолбэк
+  // на старый GET /api/recommendations.
+  async function requestRecommendations(bustCache) {
+    const exclude = [
+      ...existingTitles(),
+      ...items.map((item) => item.title),
+      ...seenTitles()
+    ].filter(Boolean);
+
+    // Пока пользователь не свайпал — обычная (кешируемая) персональная лента.
+    // Как только появились свайпы — адаптивный POST-эндпоинт с сессией.
+    if (hasSwipeSession()) {
+      try {
+        const response = await fetch('/api/discover/feed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...window.authHeaders() },
+          body: JSON.stringify({ limit: BATCH_SIZE, excludeTitles: exclude, session: sessionPayload(), lang: lang() })
+        });
+        const data = await response.json();
+        if (response.ok) return data.recommendations || [];
+      } catch { /* уходим в фолбэк ниже */ }
     }
 
-    try {
-      const result = await window.MovieApp.executeActions([{
-        type: 'add_movie',
-        title: item.title,
-        status: 'want',
-        mediaType: item.mediaType || 'movie',
-        tmdbId: item.tmdbId,
-        genres: item.genres || [],
-        meta: {
-          poster: item.poster,
-          year: item.year,
-          overview: item.overview,
-          hdrezkaUrl: item.hdrezkaUrl,
-          originalTitle: item.originalTitle
-        }
-      }]);
+    const params = new URLSearchParams();
+    params.set('limit', String(BATCH_SIZE));
+    params.set('excludeTitles', exclude.join(','));
+    params.set('lang', lang());
+    if (bustCache) params.set('nocache', '1');
+    const response = await fetch(`/api/recommendations?${params}`, { headers: window.authHeaders() });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Ошибка загрузки');
+    return data.recommendations || [];
+  }
 
-      if (result?.[0]?.success) {
-        nextCard(`Добавлено: ${item.title}`, 'success');
-        return;
-      }
+  async function fetchFeed(append, { bustCache = false } = {}) {
+    const incoming = await requestRecommendations(bustCache);
 
-      nextCard(result?.[0]?.error || 'Не удалось добавить', 'error');
-    } catch (error) {
-      nextCard(error.message || 'Не удалось сохранить на сервер', 'error');
-    }
+    const knownKeys = new Set(items.map(recommendationKey));
+    const fresh = incoming.filter((item) => {
+      const key = recommendationKey(item);
+      if (knownKeys.has(key) || isAlreadySaved(item) || isSeen(item)) return false;
+      knownKeys.add(key);
+      return true;
+    });
+    const topUp = localTopUp(Math.max(0, BATCH_SIZE - fresh.length), knownKeys);
+    return append ? [...fresh, ...topUp] : [...fresh, ...topUp].slice(0, BATCH_SIZE);
+  }
+
+  // ── Адаптация ленты после свайпа вправо ────────────────────────────
+  // Через 1–2 уже готовые карточки в очередь начинают попадать похожие
+  // фильмы. Запрос мягко дебаунсится: пока один летит — следующий ставится
+  // в очередь, а не дёргает сервер на каждый свайп.
+  function scheduleAdaptation() {
+    if (!hasSwipeSession()) return;
+    if (adaptInFlight) { adaptQueued = true; return; }
+    adaptInFlight = true;
+    fetchAdaptedBatch()
+      .then((batch) => { if (batch && batch.length) applyAdaptedFeed(batch); })
+      .catch(() => undefined)
+      .finally(() => {
+        adaptInFlight = false;
+        if (adaptQueued) { adaptQueued = false; scheduleAdaptation(); }
+      });
+  }
+
+  async function fetchAdaptedBatch() {
+    const exclude = [
+      ...existingTitles(),
+      ...seenTitles()
+    ].filter(Boolean);
+    const response = await fetch('/api/discover/feed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...window.authHeaders() },
+      body: JSON.stringify({ limit: BATCH_SIZE, excludeTitles: exclude, session: sessionPayload(), lang: lang() })
+    });
+    const data = await response.json();
+    if (!response.ok) return [];
+    return data.recommendations || [];
+  }
+
+  // Сохраняем ближайшие 1–2 карточки (естественная задержка), а дальше
+  // подменяем хвост очереди свежей адаптированной + смешанной подборкой.
+  function applyAdaptedFeed(batch) {
+    const GAP = 2;
+    const keepUntil = Math.min(items.length, index + GAP);
+    const head = items.slice(0, keepUntil);
+
+    const known = new Set(head.map(recommendationKey));
+    const fresh = batch.filter((item) => {
+      const key = recommendationKey(item);
+      if (known.has(key) || isAlreadySaved(item) || isSeen(item)) return false;
+      known.add(key);
+      return true;
+    });
+    if (!fresh.length) return;
+
+    items = [...head, ...fresh];
+    renderStack();
   }
 
   async function loadFeed(append = false) {
     if (loading && !append) return;
+    const manual = !append;
     setLoading(true);
     if (!append) {
+      // Ручное «Обновить»: помечаем уже показанную колоду как просмотренную,
+      // иначе сервер вернёт те же фильмы (они ещё не попали в seen, ведь
+      // пользователь мог не свайпать). Так каждая пачка приносит новое.
+      if (manual) items.forEach(markSeen);
       items = [];
       index = 0;
       stack.innerHTML = window.LoadingUI?.aiRecommendations('Загружаю свайп-ленту...', 1, { tag: 'div' }) || '<div class="rec-empty">Загрузка...</div>';
       setStatus('');
     }
-    if (hintEl) hintEl.textContent = feeds[activeFeed].label;
 
     try {
-      const params = new URLSearchParams();
-      params.set('limit', String(BATCH_SIZE));
-      params.set('excludeTitles', [...existingTitles(), ...items.map((item) => item.title)].filter(Boolean).join(','));
-      if (feeds[activeFeed].mediaType) params.set('mediaType', feeds[activeFeed].mediaType);
-      if (feeds[activeFeed].category) params.set('category', feeds[activeFeed].category);
+      let batch = await fetchFeed(append, { bustCache: manual });
 
-      const response = await fetch(`/api/recommendations?${params}`, { headers: window.authHeaders() });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Ошибка загрузки');
+      // Если на ручном обновлении всё уже просмотрено — сбрасываем память
+      // и пробуем ещё раз, чтобы лента не оставалась пустой навсегда.
+      if (manual && !batch.length && seenEntries.size) {
+        resetSeen();
+        batch = await fetchFeed(false, { bustCache: true });
+      }
 
-      const knownKeys = new Set(items.map(recommendationKey));
-      const fresh = (data.recommendations || [])
-        .filter((item) => matchesFeed(item, activeFeed))
-        .filter((item) => {
-          const key = recommendationKey(item);
-          if (knownKeys.has(key) || isAlreadySaved(item)) return false;
-          knownKeys.add(key);
-          return true;
-        });
-      const topUp = localTopUp(Math.max(0, BATCH_SIZE - fresh.length), knownKeys);
-      items = append ? [...items, ...fresh, ...topUp] : [...fresh, ...topUp].slice(0, BATCH_SIZE);
-      if (!items.length) setStatus('Пока нечего показать для этой ленты.', 'error');
+      items = append ? [...items, ...batch] : batch;
+      if (!items.length) setStatus(window.t ? window.t('discover.nothing') : 'Пока нечего показать.', 'error');
+      else if (manual) setStatus(window.t ? window.t('common.updated') : 'Подборка обновлена', 'success');
     } catch (error) {
       const knownKeys = new Set(items.map(recommendationKey));
       const fallback = localTopUp(BATCH_SIZE, knownKeys);
@@ -341,21 +551,16 @@
     }
   }
 
-  document.querySelectorAll('.discover-tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const nextFeed = tab.dataset.feed;
-      if (!nextFeed || nextFeed === activeFeed || loading) return;
-      activeFeed = nextFeed;
-      document.querySelectorAll('.discover-tab').forEach((item) => {
-        item.classList.toggle('discover-tab--active', item === tab);
-      });
-      loadFeed(false);
-    });
-  });
-
   refreshBtn?.addEventListener('click', () => loadFeed(false));
   likeBtn?.addEventListener('click', () => animateChoice('like'));
   skipBtn?.addEventListener('click', () => animateChoice('skip'));
+  watchedBtn?.addEventListener('click', () => animateChoice('watched'));
+
+  // Смена языка: названия/описания карточек (TMDB) зависят от языка —
+  // перезагружаем ленту, чтобы получить локализованные тайтлы.
+  document.addEventListener('i18n:change', () => {
+    if (items && items.length) loadFeed(false);
+  });
 
   window.DiscoverPWA = {
     refresh: () => loadFeed(false)

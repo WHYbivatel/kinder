@@ -54,3 +54,33 @@ export function transliterateRuToLatin(text) {
 
   return out.replace(/\s+/g, ' ').trim();
 }
+
+/**
+ * Транслитерация имени человека (актёр/режиссёр) в латиницу с сохранением
+ * заглавных букв в каждом слове. Используется для англоязычного режима, когда
+ * TMDB отдаёт имя русского человека кириллицей. Слова, не содержащие кириллицы
+ * (уже латинские), остаются без изменений.
+ */
+export function transliterateRuName(text) {
+  const str = String(text || '').trim();
+  if (!str) return '';
+  return str
+    .split(/(\s+|-)/)
+    .map((part) => {
+      if (!part || /^\s+$/.test(part) || part === '-') return part;
+      if (!containsCyrillic(part)) return part;
+      const lat = transliterateRuToLatin(part);
+      if (!lat) return part;
+      return lat.charAt(0).toUpperCase() + lat.slice(1);
+    })
+    .join('');
+}
+
+/** В англоязычном режиме переводит кириллическое имя в латиницу (иначе как есть). */
+export function localizePersonName(name, lang) {
+  const str = String(name || '').trim();
+  if (!str) return str;
+  const isEn = lang === 'en' || lang === 'en-US';
+  if (isEn && containsCyrillic(str)) return transliterateRuName(str);
+  return str;
+}

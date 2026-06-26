@@ -6,6 +6,25 @@ const collectionResults = document.getElementById('collection-results');
 
 const ft = (key, fallback) => (window.t ? window.t(key) : fallback);
 
+const COLLECTION_QUERY_FALLBACKS = {
+  empty: 'Опишите, что хотите посмотреть — хотя бы пару слов.',
+  too_short: 'Слишком короткий запрос — опишите подробнее.',
+  too_long: 'Слишком длинный запрос — сократите до пары предложений.',
+  profanity: 'Напишите, что хотите посмотреть — настроение или жанр, без ругательств.',
+  off_topic: 'Не понял запрос. Опишите настроение, жанр или ситуацию — например: «устал, хочу лёгкую комедию».'
+};
+
+let collectionQueryModule = null;
+import('./collectionQueryValidation.js')
+  .then((mod) => { collectionQueryModule = mod; })
+  .catch(() => undefined);
+
+function collectionQueryErrorText(code) {
+  const key = collectionQueryModule?.collectionQueryErrorKey?.(code);
+  if (key) return ft(key, COLLECTION_QUERY_FALLBACKS[code] || ft('collections.error', 'Ошибка подборки'));
+  return COLLECTION_QUERY_FALLBACKS[code] || ft('collections.error', 'Ошибка подборки');
+}
+
 const PRESETS = [
   { id: 'evening', labelKey: 'preset.evening', label: 'На вечер' },
   { id: 'weekend', labelKey: 'preset.weekend', label: 'На выходные' },
@@ -24,7 +43,7 @@ function renderPickList(container, items, titleKey, reasonKey) {
   items.forEach((item) => {
     const li = document.createElement('li');
     li.className = 'pick-item';
-    const title = item[titleKey];
+    const title = window.MovieDisplay?.displayTitle(item) || item[titleKey];
     const originalHtml = window.MovieDisplay.formatOriginalTitleHtml(
       item.originalTitle,
       title,
@@ -81,7 +100,8 @@ async function loadCollection(query, preset) {
       if (res.status === 401 && window.requireLogin) {
         window.requireLogin(data.error || ft('collections.loginRequired', 'Войдите, чтобы пользоваться умными подборками.'));
       }
-      collectionResults.innerHTML = `<li class="rec-empty">${data.error || ft('collections.error', 'Ошибка подборки')}</li>`;
+      const msg = data.error || (data.code ? collectionQueryErrorText(data.code) : ft('collections.error', 'Ошибка подборки'));
+      collectionResults.innerHTML = `<li class="rec-empty">${msg}</li>`;
       return;
     }
     const picks = data.picks || [];
@@ -113,17 +133,35 @@ if (collectionPresets) {
   });
 }
 
-collectionSubmit?.addEventListener('click', () => {
-  const q = collectionInput?.value.trim();
-  // Пустой запрос — не «глухая» кнопка, а персональная подборка по алгоритму.
-  loadCollection(q || null, null);
-});
+function submitFreeCollection() {
+  const q = collectionInput?.value.trim() || '';
+  if (!q) {
+    if (collectionResults) {
+      collectionResults.innerHTML = `<li class="rec-empty">${ft('collections.inputRequired', 'Опишите, что хотите посмотреть — хотя бы пару слов.')}</li>`;
+    }
+    collectionInput?.focus();
+    return;
+  }
+  if (collectionQueryModule?.validateCollectionQuery) {
+    const validation = collectionQueryModule.validateCollectionQuery(q);
+    if (!validation.ok) {
+      if (collectionResults) {
+        collectionResults.innerHTML = `<li class="rec-empty">${collectionQueryErrorText(validation.code)}</li>`;
+      }
+      collectionInput?.focus();
+      return;
+    }
+  }
+  loadCollection(q, null);
+}
+
+collectionSubmit?.addEventListener('click', submitFreeCollection);
 
 // Enter в поле запроса — тоже запускает подбор.
 collectionInput?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
-    loadCollection(collectionInput.value.trim() || null, null);
+    submitFreeCollection();
   }
 });
 
@@ -179,33 +217,37 @@ async function refreshStats() {
     if (!res.ok) return;
 
     statsGrid.innerHTML = `
-      <div class="stat-card"><span class="stat-num">${data.totalWatched ?? 0}</span><span class="stat-label">просмотрено</span></div>
-      <div class="stat-card"><span class="stat-num">${data.plannedCount ?? 0}</span><span class="stat-label">в планах</span></div>
-      <div class="stat-card"><span class="stat-num">${data.avgRating ?? '—'}</span><span class="stat-label">средняя оценка</span></div>
+      <div class="stat-card"><span class="stat-num">${data.totalWatched ?? 0}</span><span class="stat-label">${ft('stats.watched', 'просмотрено')}</span></div>
+      <div class="stat-card"><span class="stat-num">${data.plannedCount ?? 0}</span><span class="stat-label">${ft('stats.planned', 'в планах')}</span></div>
+      <div class="stat-card"><span class="stat-num">${data.avgRating ?? '—'}</span><span class="stat-label">${ft('stats.avgRating', 'средняя оценка')}</span></div>
     `;
 
     if (statsRecent) {
       statsRecent.innerHTML = (data.recent || []).map((m) =>
         `<li>${m.title} — ${new Date(m.watchedAt).toLocaleDateString('ru')} ${m.rating ? `(${m.rating}/10)` : ''}</li>`
-      ).join('') || '<li class="rec-empty">Пока нет</li>';
+      ).join('') || `<li class="rec-empty">${ft('stats.noGenres', 'Пока нет')}</li>`;
     }
 
     if (statsMonthly) {
       statsMonthly.innerHTML = (data.monthly || []).map(([month, count]) =>
         `<li><span>${month}</span><div class="bar-wrap"><div class="bar" style="width:${Math.min(count * 20, 100)}%"></div></div><span>${count}</span></li>`
-      ).join('') || '<li class="rec-empty">Пока нет</li>';
+      ).join('') || `<li class="rec-empty">${ft('stats.noGenres', 'Пока нет')}</li>`;
     }
 
     const genresEl = document.getElementById('stats-genres');
     if (genresEl) {
       genresEl.innerHTML = (data.favoriteGenres || []).map((g) =>
-        `<span class="tag-chip">${g.name} <small>${g.count}</small></span>`
-      ).join('') || '<span class="rec-empty">Пока нет данных</span>';
+        `<span class="tag-chip">${window.MovieDisplay?.escapeHtml(window.MovieDisplay?.displayGenre(g.name) || g.name)} <small>${g.count}</small></span>`
+      ).join('') || `<span class="rec-empty">${ft('stats.noGenres', 'Пока нет данных')}</span>`;
     }
   } catch (e) { /* skip */ }
 }
 
 window.refreshStats = refreshStats;
+
+document.addEventListener('i18n:change', () => {
+  window.refreshStats?.();
+});
 
 // Модалки
 const modalOverlay = document.getElementById('modal-overlay');
@@ -248,10 +290,11 @@ window.closeModal = closeModal;
 
 window.openMovieOverview = function (movieId) {
   const movie = window.MovieApp.findMovieById(movieId);
-  if (!movie?.meta?.overview) return;
+  const overview = window.MovieDisplay?.displayOverview(movie);
+  if (!overview) return;
 
-  const title = movie.meta.matchedTitle || movie.title;
-  const body = `<p class="overview-full">${movie.meta.overview.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`;
+  const title = window.MovieDisplay?.displayTitle(movie) || movie.meta?.matchedTitle || movie.title;
+  const body = `<p class="overview-full">${window.MovieDisplay.escapeHtml(overview)}</p>`;
   openModal(title, body);
 };
 
@@ -340,7 +383,7 @@ window.openHistoryModal = function (movieId) {
 };
 
 window.findSimilar = async function (movieId) {
-  openModal('Похожие фильмы', window.LoadingUI.ai('Ищу похожие...', { tag: 'p', wrapClass: '' }));
+  openModal(ft('features.similarTitle', 'Похожие фильмы'), window.LoadingUI.ai(ft('features.findingSimilar', 'Ищу похожие...'), { tag: 'p', wrapClass: '' }));
   try {
     const res = await fetch('/api/similar', {
       method: 'POST',

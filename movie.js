@@ -13,8 +13,27 @@
   const tmdbId = params.get('id');
   const mediaType = params.get('type') === 'tv' ? 'tv' : 'movie';
 
-  const t = (key, vars) => (window.t ? window.t(key, vars) : key);
-  const lang = () => (window.I18N ? window.I18N.tmdbLang() : 'ru');
+  function t(key, fallbackOrVars, vars) {
+    const interpolation = vars ?? (
+      fallbackOrVars && typeof fallbackOrVars === 'object' && !Array.isArray(fallbackOrVars)
+        ? fallbackOrVars
+        : undefined
+    );
+    if (window.t) {
+      const out = window.t(key, interpolation);
+      if (out !== key) return out;
+    }
+    if (typeof fallbackOrVars === 'string') {
+      if (interpolation) {
+        return fallbackOrVars.replace(/\{(\w+)\}/g, (m, name) =>
+          interpolation[name] != null ? interpolation[name] : m);
+      }
+      return fallbackOrVars;
+    }
+    return key;
+  }
+  const lang = () => (window.I18N ? window.I18N.getLang() : 'ru');
+  const tmdbApiLang = () => (window.I18N ? window.I18N.tmdbLang() : 'ru-RU');
 
   backBtn?.addEventListener('click', () => {
     if (history.length > 1) history.back();
@@ -24,8 +43,11 @@
   function token() { return sessionStorage.getItem('token'); }
   function isLoggedIn() { return Boolean(token() && sessionStorage.getItem('username')); }
   function authHeaders() {
+    const headers = {};
     const t = token();
-    return t ? { Authorization: `Bearer ${t}` } : {};
+    if (t) headers.Authorization = `Bearer ${t}`;
+    if (window.I18N?.apiHeaders) Object.assign(headers, window.I18N.apiHeaders());
+    return headers;
   }
 
   function esc(text) {
@@ -354,10 +376,137 @@
       <div class="movie-add">
         <p class="movie-add-label">${esc(t('movie.addToList'))}</p>
         <div class="movie-add-actions">
-          <button type="button" class="movie-add-btn" data-status="want">${esc(t('movie.want'))}</button>
-          <button type="button" class="movie-add-btn movie-add-btn--watched" data-status="watched">${esc(t('movie.watched'))}</button>
+          <button type="button" class="movie-add-btn movie-add-btn--want" data-status="want">${esc(t('movie.want'))}</button>
+          <button type="button" class="movie-add-btn movie-add-btn--watched" data-status="watched">${esc(t('movie.markWatched', 'Посмотрел'))}</button>
+        </div>
+      </div>
+      <div class="movie-user-rating hidden" id="movie-user-rating">
+        <p class="movie-user-rating__label">${esc(t('movie.myRating', 'Моя оценка'))}</p>
+        <div class="movie-user-rating__row">
+          <span class="movie-user-rating__value" id="movie-user-rating-value"></span>
+          <button type="button" class="movie-user-rating__btn" id="movie-user-rating-btn"></button>
         </div>
       </div>`;
+  }
+
+  let listEntry = null;
+
+  function applyAddButtonState(status, entry = listEntry) {
+    const wantBtn = root.querySelector('.movie-add-btn--want');
+    const watchedBtn = root.querySelector('.movie-add-btn--watched');
+    if (!wantBtn || !watchedBtn) return;
+
+    wantBtn.classList.remove('movie-add-btn--in-list');
+    watchedBtn.classList.remove('movie-add-btn--in-list');
+    wantBtn.disabled = false;
+    watchedBtn.disabled = false;
+    wantBtn.textContent = t('movie.want');
+    watchedBtn.textContent = t('movie.markWatched', 'Посмотрел');
+
+    if (status === 'want') {
+      wantBtn.classList.add('movie-add-btn--in-list');
+      wantBtn.textContent = t('movie.inList');
+      wantBtn.disabled = true;
+    } else if (status === 'watched') {
+      watchedBtn.classList.add('movie-add-btn--in-list');
+      watchedBtn.textContent = entry?.rating
+        ? t('movie.watchedRated', '✓ Посмотрел · {rating}/10', { rating: entry.rating })
+        : t('movie.watchedInList', '✓ Посмотрел');
+      watchedBtn.disabled = true;
+    }
+
+    applyUserRatingState(entry);
+  }
+
+  function applyUserRatingState(entry = listEntry) {
+    const block = root.querySelector('#movie-user-rating');
+    const valueEl = root.querySelector('#movie-user-rating-value');
+    const btn = root.querySelector('#movie-user-rating-btn');
+    if (!block || !valueEl || !btn) return;
+
+    if (!isLoggedIn() || entry?.status !== 'watched') {
+      block.classList.add('hidden');
+      block.classList.remove('movie-user-rating--pending');
+      return;
+    }
+
+    block.classList.remove('hidden');
+    if (entry.rating) {
+      valueEl.textContent = t('movie.myRatingValue', '{rating}/10', { rating: entry.rating });
+      valueEl.classList.remove('movie-user-rating__value--empty');
+      btn.textContent = t('movie.changeRating', 'Изменить');
+      block.classList.remove('movie-user-rating--pending');
+    } else {
+      valueEl.textContent = t('movie.noRatingYet', 'Без оценки');
+      valueEl.classList.add('movie-user-rating__value--empty');
+      btn.textContent = t('movie.rateNow', 'Оценить');
+      block.classList.add('movie-user-rating--pending');
+    }
+  }
+
+  async function saveWatchedRating(data, rating) {
+    const res = await fetch('/api/movies/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        tmdbId: data.tmdbId,
+        mediaType: data.mediaType,
+        status: 'watched',
+        rating,
+        title: data.title,
+        genres: data.genres,
+        poster: data.meta?.poster
+      })
+    });
+    if (res.status === 401) {
+      toast(t('auth.sessionExpired'));
+      return null;
+    }
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error || t('movie.ratingFailed', 'Не удалось сохранить оценку'));
+    return out.movie || { ...listEntry, status: 'watched', rating };
+  }
+
+  async function openWatchedRatingEditor(data) {
+    if (!isLoggedIn()) {
+      toast(t('auth.loginToAdd'));
+      return;
+    }
+    if (listEntry?.status !== 'watched') return;
+
+    const rating = await window.promptWatchedRating?.({
+      title: data.title,
+      initialRating: listEntry.rating ?? undefined,
+      confirmLabel: t('movie.saveRating', 'Сохранить оценку')
+    });
+    if (!rating) return;
+
+    const btn = root.querySelector('#movie-user-rating-btn');
+    if (btn) btn.disabled = true;
+    try {
+      const updated = await saveWatchedRating(data, rating);
+      if (!updated) return;
+      listEntry = updated;
+      applyAddButtonState('watched', listEntry);
+      toast(t('movie.ratingSaved', 'Оценка сохранена'));
+    } catch (err) {
+      toast(err.message || t('movie.ratingFailed', 'Не удалось сохранить оценку'));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function refreshListStatus(movieData) {
+    if (!isLoggedIn()) return;
+    try {
+      const res = await fetch('/api/movies', { headers: authHeaders() });
+      if (!res.ok) return;
+      const payload = await res.json();
+      const movies = Array.isArray(payload.movies) ? payload.movies : [];
+      const id = Number(movieData.tmdbId || tmdbId);
+      listEntry = movies.find((m) => m.tmdbId === id && (m.mediaType || 'movie') === mediaType) || null;
+      applyAddButtonState(listEntry?.status || null, listEntry);
+    } catch { /* ignore */ }
   }
 
   function render(data) {
@@ -391,7 +540,7 @@
         <div id="torrents-section"></div>
         ${meta.overview ? `
           <section class="movie-block">
-            <h2 class="movie-block-title">Описание</h2>
+            <h2 class="movie-block-title">${esc(t('movie.overview'))}</h2>
             <p class="movie-overview">${esc(meta.overview)}</p>
           </section>` : ''}
         ${meta.director ? `
@@ -410,6 +559,12 @@
     root.querySelectorAll('.movie-add-btn').forEach((btn) => {
       btn.addEventListener('click', () => addToList(btn.dataset.status, data, btn));
     });
+
+    root.querySelector('#movie-user-rating-btn')?.addEventListener('click', () => {
+      openWatchedRatingEditor(data);
+    });
+
+    refreshListStatus(data);
 
     // Баннер и постер открываются на весь экран с возможностью увеличения.
     const heroEl = root.querySelector('.movie-hero--zoomable');
@@ -437,7 +592,13 @@
       setTimeout(() => { location.href = '/'; }, 1500);
       return;
     }
-    const original = btn.textContent;
+
+    let rating = null;
+    if (status === 'watched') {
+      rating = await window.promptWatchedRating?.({ title: data.title });
+      if (!rating) return;
+    }
+
     btn.disabled = true;
     btn.textContent = t('movie.adding');
     try {
@@ -448,6 +609,7 @@
           tmdbId: data.tmdbId,
           mediaType: data.mediaType,
           status,
+          rating,
           title: data.title,
           genres: data.genres,
           poster: data.meta?.poster
@@ -455,16 +617,16 @@
       });
       if (res.status === 401) {
         toast(t('auth.sessionExpired'));
-        btn.disabled = false; btn.textContent = original;
+        applyAddButtonState(listEntry?.status || null, listEntry);
         return;
       }
       const out = await res.json();
       if (!res.ok) throw new Error(out.error || t('common.error'));
-      btn.textContent = out.updated ? t('movie.updated') : t('movie.inList');
+      listEntry = out.movie || { status, rating, tmdbId: data.tmdbId, mediaType: data.mediaType };
+      applyAddButtonState(status, listEntry);
       toast(status === 'watched' ? t('movie.addedWatched') : t('movie.addedWant'));
     } catch (err) {
-      btn.disabled = false;
-      btn.textContent = original;
+      applyAddButtonState(listEntry?.status || null, listEntry);
       toast(err.message || t('movie.addFailed'));
     }
   }
@@ -498,46 +660,119 @@
     }
   }
 
-  // ── Нативный плеер HDRezka. Бэкенд отдаёт прямые .mp4-потоки с качествами и
-  //    списком озвучек; собираем обычный <video> и селекторы качества/озвучки.
-  //    Потоки кэшируются на сервере, поэтому повторные открытия быстрые. ──
-  let playerState = null; // { id, type, voices, activeVoice, qualities, activeQuality }
+  // ── Нативный плеер HDRezka ───────────────────────────────────────
+  let playerState = null;
 
-  // Выбираем качество «по умолчанию»: 720p, иначе максимально доступное.
   function pickDefaultQuality(qualities) {
     const byLabel = qualities.find((q) => /(^|\D)720p/i.test(q.label));
     return (byLabel || qualities[0])?.label || null;
   }
 
+  function playerApiUrl(overrides = {}) {
+    const s = { ...playerState, ...overrides };
+    const params = new URLSearchParams({ type: s.type });
+    if (s.activeVoice) params.set('translator', s.activeVoice);
+    if (s.isSeries && s.activeSeason) params.set('season', s.activeSeason);
+    if (s.isSeries && s.activeEpisode) params.set('episode', s.activeEpisode);
+    return `/api/movie/player/${encodeURIComponent(s.id)}?${params}`;
+  }
+
   function renderPlayerError(slot) {
     const body = slot.querySelector('.movie-player-status');
     if (body) {
-      body.textContent = t('movie.playerUnavailable') || 'Плеер временно недоступен';
+      body.textContent = t('movie.playerUnavailable');
       body.classList.add('movie-player-status--error');
     }
   }
 
-  function playerControlsHtml() {
-    const { voices, activeVoice, qualities, activeQuality } = playerState;
-    const qualityOpts = qualities
-      .map((q) => `<option value="${esc(q.label)}"${q.label === activeQuality ? ' selected' : ''}>${esc(q.label)}</option>`)
-      .join('');
-    const voiceSelect = voices.length > 1
-      ? `<label class="movie-player-ctrl">
-           <span>${esc(t('movie.voice') || 'Озвучка')}</span>
-           <select class="movie-player-voice">
-             ${voices.map((v) => `<option value="${esc(v.id)}"${String(v.id) === String(activeVoice) ? ' selected' : ''}>${esc(v.name)}</option>`).join('')}
-           </select>
-         </label>`
+  function seasonLabel(season) {
+    return season.label && !/^\d+$/.test(season.label)
+      ? season.label
+      : t('movie.seasonN', { n: season.id });
+  }
+
+  function episodeLabel(ep) {
+    return ep.label && !/^\d+$/.test(ep.label)
+      ? ep.label
+      : t('movie.episodeN', { n: ep.id });
+  }
+
+  function playerChip(active, attrs, label, { multiline = false } = {}) {
+    const titleAttr = multiline ? ` title="${esc(label)}"` : '';
+    const content = multiline
+      ? `<span class="movie-player-chip__label">${esc(label)}</span>`
+      : esc(label);
+    return `<button type="button" class="movie-player-chip${multiline ? ' movie-player-chip--multiline' : ''}${active ? ' is-active' : ''}" ${attrs}${titleAttr}>${content}</button>`;
+  }
+
+  function subtitleSrclang(lang) {
+    const l = String(lang || '').toLowerCase();
+    if (/рус|rus|russian/.test(l)) return 'ru';
+    if (/eng|англ|english/.test(l)) return 'en';
+    if (/каз|kaz|қазақ|qazaq/.test(l)) return 'kk';
+    return 'ru';
+  }
+
+  function subtitleTracksHtml(subtitles) {
+    if (!subtitles?.length) return '';
+    return subtitles.map((s, i) => {
+      const src = String(s.url || '').trim();
+      if (!src) return '';
+      return `<track kind="captions" label="${esc(s.lang)}" srclang="${esc(subtitleSrclang(s.lang))}" src="${esc(src)}"${i === 0 ? ' default' : ''}>`;
+    }).join('');
+  }
+
+  function playerLayoutHtml() {
+    const { voices, activeVoice, qualities, activeQuality, isSeries, seasons, activeSeason, activeEpisode, subtitles } = playerState;
+
+    const voiceSection = voices.length > 1
+      ? `<div class="movie-player-voices">
+           <div class="movie-player-voices__head">
+             <span class="movie-player-voices__title">${esc(t('movie.selectVoice'))}</span>
+           </div>
+           <div class="movie-player-voices__grid">
+             ${voices.map((v) => playerChip(
+               String(v.id) === String(activeVoice),
+               `data-voice-id="${esc(v.id)}"`,
+               v.name,
+               { multiline: true }
+             )).join('')}
+           </div>
+         </div>`
       : '';
+
+    const seasonSection = isSeries && seasons.length
+      ? `<div class="movie-player-seasons" role="tablist" aria-label="${esc(t('movie.season'))}">
+           ${seasons.map((s) => playerChip(
+             s.id === activeSeason,
+             `data-season-id="${s.id}"`,
+             seasonLabel(s)
+           )).join('')}
+         </div>`
+      : '';
+
+    const activeSeasonData = seasons.find((s) => s.id === activeSeason);
+    const episodeSection = isSeries && activeSeasonData?.episodes?.length
+      ? `<div class="movie-player-episodes" role="tablist" aria-label="${esc(t('movie.episode'))}">
+           ${activeSeasonData.episodes.map((e) => playerChip(
+             e.id === activeEpisode,
+             `data-episode-id="${e.id}"`,
+             episodeLabel(e)
+           )).join('')}
+         </div>`
+      : '';
+
     return `
-      <div class="movie-player-controls">
-        ${voiceSelect}
-        <label class="movie-player-ctrl">
-          <span>${esc(t('movie.quality') || 'Качество')}</span>
-          <select class="movie-player-quality">${qualityOpts}</select>
-        </label>
-      </div>`;
+      ${voiceSection}
+      ${seasonSection}
+      <div class="movie-player">
+        <div class="custom-player-shell">
+          <video class="movie-player-video" playsinline preload="metadata" crossorigin="anonymous">
+            ${subtitleTracksHtml(subtitles)}
+          </video>
+        </div>
+      </div>
+      ${episodeSection}`;
   }
 
   function currentQualityUrl() {
@@ -546,10 +781,51 @@
     return q?.url || '';
   }
 
-  // Переключаем источник <video>, сохраняя позицию и состояние воспроизведения.
+  function playbackUrl(directUrl) {
+    if (!directUrl) return '';
+    return `/api/movie/stream?url=${encodeURIComponent(directUrl)}`;
+  }
+
+  function bindVideoElement(video, slot) {
+    if (!video || video.dataset.bound) return;
+    video.dataset.bound = '1';
+    video.crossOrigin = 'anonymous';
+    video.addEventListener('error', () => {
+      const code = video.error?.code;
+      if (code === 4 || code === 2) {
+        toast(t('movie.playerStreamError'));
+      }
+      const block = slot?.querySelector('.movie-player-block');
+      const status = block?.querySelector('.movie-player-status');
+      if (status) {
+        status.textContent = t('movie.playerStreamError');
+        status.classList.add('movie-player-status--error');
+        status.hidden = false;
+      }
+    });
+
+    const captionLang = (window.I18N?.getLang?.() === 'en') ? 'en'
+      : (window.I18N?.getLang?.() === 'kk') ? 'kk' : 'ru';
+
+    window.MoviePlyr?.init(video, {
+      qualities: playerState?.qualities || [],
+      activeQuality: playerState?.activeQuality,
+      captionLanguage: captionLang,
+      onQualityChange: (plyrQ) => {
+        const label = window.MoviePlyr?.qualityLabelFromPlyr?.(plyrQ, playerState?.qualities);
+        if (!label || label === playerState.activeQuality) return;
+        playerState.activeQuality = label;
+        swapVideoSource(video, currentQualityUrl(), {
+          resumeTime: video.currentTime,
+          wasPlaying: !video.paused
+        });
+      }
+    });
+  }
+
   function swapVideoSource(video, url, { resumeTime = 0, wasPlaying = false } = {}) {
     if (!url) return;
-    video.src = url;
+    video.src = playbackUrl(url);
     const restore = () => {
       video.removeEventListener('loadedmetadata', restore);
       if (resumeTime > 0 && Number.isFinite(resumeTime)) {
@@ -561,63 +837,106 @@
     video.load();
   }
 
+  function applyPlayerData(data, slot, video, { resumeTime = 0, wasPlaying = false } = {}) {
+    window.MoviePlyr?.destroy();
+
+    playerState.voices = data.voices || playerState.voices;
+    playerState.activeVoice = data.activeVoice || playerState.activeVoice;
+    playerState.qualities = data.qualities;
+    playerState.isSeries = Boolean(data.isSeries);
+    playerState.seasons = data.seasons || playerState.seasons || [];
+    playerState.activeSeason = data.activeSeason ?? playerState.activeSeason;
+    playerState.activeEpisode = data.activeEpisode ?? playerState.activeEpisode;
+    playerState.subtitles = data.subtitles || [];
+
+    if (!playerState.qualities.some((q) => q.label === playerState.activeQuality)) {
+      playerState.activeQuality = pickDefaultQuality(playerState.qualities);
+    }
+
+    const block = slot.querySelector('.movie-player-block');
+    const wrap = block.querySelector('.movie-player-wrap');
+    if (wrap) {
+      wrap.innerHTML = playerLayoutHtml();
+      video = wrap.querySelector('.movie-player-video');
+      bindVideoElement(video, slot);
+      bindPlayerControls(slot);
+    }
+
+    swapVideoSource(video, currentQualityUrl(), { resumeTime, wasPlaying });
+  }
+
+  function bindPlayerControls(slot) {
+    const wrap = slot.querySelector('.movie-player-wrap');
+    if (!wrap || wrap.dataset.controlsBound) return;
+    wrap.dataset.controlsBound = '1';
+
+    wrap.addEventListener('click', (e) => {
+      const video = wrap.querySelector('.movie-player-video');
+      if (!video) return;
+
+      const voiceBtn = e.target.closest('[data-voice-id]');
+      if (voiceBtn) {
+        e.preventDefault();
+        if (voiceBtn.classList.contains('is-active')) return;
+        reloadPlayer(slot, video, { translator: voiceBtn.dataset.voiceId });
+        return;
+      }
+
+      const seasonBtn = e.target.closest('[data-season-id]');
+      if (seasonBtn) {
+        e.preventDefault();
+        if (seasonBtn.classList.contains('is-active')) return;
+        const season = Number(seasonBtn.dataset.seasonId);
+        const firstEp = playerState.seasons.find((s) => s.id === season)?.episodes?.[0]?.id;
+        reloadPlayer(slot, video, { season, episode: firstEp });
+        return;
+      }
+
+      const episodeBtn = e.target.closest('[data-episode-id]');
+      if (episodeBtn) {
+        e.preventDefault();
+        if (episodeBtn.classList.contains('is-active')) return;
+        reloadPlayer(slot, video, { episode: Number(episodeBtn.dataset.episodeId) });
+      }
+    });
+  }
+
+  async function reloadPlayer(slot, video, { translator, season, episode } = {}) {
+    const resumeTime = video?.currentTime || 0;
+    const wasPlaying = video ? !video.paused : false;
+    try {
+      const params = {
+        type: playerState.type,
+        activeVoice: translator || playerState.activeVoice,
+        activeSeason: season ?? playerState.activeSeason,
+        activeEpisode: episode ?? playerState.activeEpisode
+      };
+      const res = await fetch(playerApiUrl(params), { headers: authHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!data?.qualities?.length) {
+        toast(translator ? t('movie.voiceFailed') : t('movie.episodeFailed'));
+        return;
+      }
+      applyPlayerData(data, slot, video, { resumeTime, wasPlaying });
+    } catch {
+      toast(translator ? t('movie.voiceFailed') : t('movie.episodeFailed'));
+    }
+  }
+
   function mountPlayerUI(slot) {
+    window.MoviePlyr?.destroy();
     const block = slot.querySelector('.movie-player-block');
     block.querySelector('.movie-player-status')?.remove();
 
     const wrap = document.createElement('div');
-    wrap.innerHTML = `
-      ${playerControlsHtml()}
-      <div class="movie-player">
-        <video class="movie-player-video" controls playsinline preload="metadata"></video>
-      </div>`;
+    wrap.className = 'movie-player-wrap';
+    wrap.innerHTML = playerLayoutHtml();
     block.appendChild(wrap);
 
     const video = block.querySelector('.movie-player-video');
+    bindVideoElement(video, slot);
+    bindPlayerControls(slot);
     swapVideoSource(video, currentQualityUrl());
-
-    block.querySelector('.movie-player-quality')?.addEventListener('change', (e) => {
-      playerState.activeQuality = e.target.value;
-      swapVideoSource(video, currentQualityUrl(), {
-        resumeTime: video.currentTime,
-        wasPlaying: !video.paused
-      });
-    });
-
-    block.querySelector('.movie-player-voice')?.addEventListener('change', async (e) => {
-      await switchVoice(slot, e.target.value, video);
-    });
-  }
-
-  // Смена озвучки: запрашиваем потоки нужного перевода и обновляем плеер.
-  async function switchVoice(slot, translatorId, video) {
-    const resumeTime = video?.currentTime || 0;
-    const wasPlaying = video ? !video.paused : false;
-    try {
-      const res = await fetch(`/api/movie/player/${encodeURIComponent(playerState.id)}?type=${playerState.type}&translator=${encodeURIComponent(translatorId)}`, {
-        headers: authHeaders()
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!data?.qualities?.length) { toast(t('movie.voiceFailed') || 'Не удалось сменить озвучку'); return; }
-      playerState.activeVoice = data.activeVoice || translatorId;
-      playerState.qualities = data.qualities;
-      if (!playerState.qualities.some((q) => q.label === playerState.activeQuality)) {
-        playerState.activeQuality = pickDefaultQuality(playerState.qualities);
-      }
-      // Перерисовываем селектор качества (набор качеств мог измениться).
-      const block = slot.querySelector('.movie-player-block');
-      const controls = block.querySelector('.movie-player-controls');
-      if (controls) controls.outerHTML = playerControlsHtml();
-      const vid = block.querySelector('.movie-player-video');
-      block.querySelector('.movie-player-quality')?.addEventListener('change', (e) => {
-        playerState.activeQuality = e.target.value;
-        swapVideoSource(vid, currentQualityUrl(), { resumeTime: vid.currentTime, wasPlaying: !vid.paused });
-      });
-      block.querySelector('.movie-player-voice')?.addEventListener('change', (e) => switchVoice(slot, e.target.value, vid));
-      swapVideoSource(vid, currentQualityUrl(), { resumeTime, wasPlaying });
-    } catch {
-      toast(t('movie.voiceFailed') || 'Не удалось сменить озвучку');
-    }
   }
 
   async function loadPlayer(id, type) {
@@ -625,8 +944,8 @@
     if (!slot) return;
     slot.innerHTML = `
       <section class="movie-block movie-player-block">
-        <h2 class="movie-block-title">${esc(t('movie.player') || 'Смотреть онлайн')}</h2>
-        <div class="movie-player-status">${esc(t('common.loading') || 'Загрузка…')}</div>
+        <h2 class="movie-block-title">${esc(t('movie.player'))}</h2>
+        <div class="movie-player-status">${esc(t('common.loading'))}</div>
       </section>`;
     try {
       const res = await fetch(`/api/movie/player/${encodeURIComponent(id)}?type=${type}`, {
@@ -640,7 +959,12 @@
         voices: data.voices || [],
         activeVoice: data.activeVoice || null,
         qualities: data.qualities,
-        activeQuality: pickDefaultQuality(data.qualities)
+        activeQuality: pickDefaultQuality(data.qualities),
+        isSeries: Boolean(data.isSeries),
+        seasons: data.seasons || [],
+        activeSeason: data.activeSeason || null,
+        activeEpisode: data.activeEpisode || null,
+        subtitles: data.subtitles || []
       };
       mountPlayerUI(slot);
     } catch {
@@ -648,25 +972,145 @@
     }
   }
 
-  function torrentRow(item) {
-    const seeds = Number(item.seeds || 0);
-    const leechs = Number(item.leechs || 0);
+  function attrEsc(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;');
+  }
+
+  async function copyMagnetLink(magnetUrl) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(magnetUrl);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = magnetUrl;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      toast(t('movie.magnetCopied'));
+      return true;
+    } catch {
+      toast(t('movie.magnetFailed'));
+      return false;
+    }
+  }
+
+  function openMagnetLink(magnetUrl) {
+    if (!magnetUrl) return;
+    const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches;
+
+    if (mobile || standalone) {
+      copyMagnetLink(magnetUrl);
+      try { window.location.href = magnetUrl; } catch { /* ignore */ }
+      return;
+    }
+
+    try {
+      const a = document.createElement('a');
+      a.href = magnetUrl;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      copyMagnetLink(magnetUrl);
+    }
+  }
+
+  function torrentSearchQuery(data) {
+    const meta = data.meta || {};
+    const original = (meta.originalTitle || meta.matchedTitle || '').trim();
+    const title = (data.title || '').trim();
+    const year = meta.year || (meta.releaseDate ? String(meta.releaseDate).slice(0, 4) : '');
+
+    // Rutor лучше ищет по английскому названию + году; длинные двуязычные запросы часто пустые.
+    if (original && year) return `${original} ${year}`;
+    if (original) return original;
+    if (title && year) return `${title} ${year}`;
+    return title;
+  }
+
+  function torrentMetaRows(item) {
+    const m = item.meta || {};
+    const rows = [];
+    if (m.year) rows.push(`<div class="torrent-detail"><span class="torrent-detail__k">${esc(t('movie.torrentYear'))}</span><span class="torrent-detail__v">${esc(m.year)}</span></div>`);
+    if (m.quality) rows.push(`<div class="torrent-detail"><span class="torrent-detail__k">${esc(t('movie.quality'))}</span><span class="torrent-detail__v">${esc(m.quality)}</span></div>`);
+    if (m.format) rows.push(`<div class="torrent-detail"><span class="torrent-detail__k">${esc(t('movie.torrentFormat'))}</span><span class="torrent-detail__v">${esc(m.format)}</span></div>`);
+    if (m.audio) rows.push(`<div class="torrent-detail"><span class="torrent-detail__k">${esc(t('movie.torrentAudio'))}</span><span class="torrent-detail__v">${esc(m.audio)}</span></div>`);
+    if (m.subtitles) rows.push(`<div class="torrent-detail"><span class="torrent-detail__k">${esc(t('movie.torrentSubtitles'))}</span><span class="torrent-detail__v">✓</span></div>`);
+    if (item.size) rows.push(`<div class="torrent-detail"><span class="torrent-detail__k">${esc(t('movie.torrentSize'))}</span><span class="torrent-detail__v">${esc(item.size)}</span></div>`);
+    rows.push(`<div class="torrent-detail"><span class="torrent-detail__k">${esc(t('movie.torrentSeeds'))}</span><span class="torrent-detail__v torrent-seeds">▲ ${Number(item.seeds || 0)}</span></div>`);
+    rows.push(`<div class="torrent-detail"><span class="torrent-detail__k">${esc(t('movie.torrentLeechs'))}</span><span class="torrent-detail__v torrent-leechs">▼ ${Number(item.leechs || 0)}</span></div>`);
+    return rows.join('');
+  }
+
+  function torrentRow(item, index) {
+    const m = item.meta || {};
+    const displayTitle = m.cleanTitle || item.title;
+    const badge = [m.quality, m.format].filter(Boolean).join(' · ');
     const magnetBtn = item.magnet
-      ? `<a href="${esc(item.magnet)}" class="btn-magnet">${esc(t('movie.magnet') || 'Магнит')}</a>`
+      ? `<button type="button" class="btn-magnet" data-magnet="${attrEsc(item.magnet)}">${esc(t('movie.magnet'))}</button>`
       : '';
     const fileBtn = item.torrentUrl
-      ? `<button type="button" class="btn-download" data-torrent-url="${esc(item.torrentUrl)}">${esc(t('movie.downloadTorrent') || 'Скачать .torrent')}</button>`
+      ? `<button type="button" class="btn-download" data-torrent-url="${attrEsc(item.torrentUrl)}">${esc(t('movie.downloadTorrent'))}</button>`
       : '';
     return `
       <li class="torrent-item">
-        <div class="torrent-title">${esc(item.title)}</div>
-        <div class="torrent-meta">
-          ${item.size ? `<span class="torrent-size">${esc(item.size)}</span>` : ''}
-          <span class="torrent-seeds">▲ ${seeds}</span>
-          <span class="torrent-leechs">▼ ${leechs}</span>
+        <button type="button" class="torrent-item__head" aria-expanded="false" aria-controls="torrent-body-${index}">
+          <span class="torrent-item__chevron" aria-hidden="true"></span>
+          <span class="torrent-item__main">
+            <span class="torrent-title">${esc(displayTitle)}</span>
+            ${badge ? `<span class="torrent-badge">${esc(badge)}</span>` : ''}
+          </span>
+          <span class="torrent-item__seeds torrent-seeds" title="${esc(t('movie.torrentSeeds'))}">▲ ${Number(item.seeds || 0)}</span>
+        </button>
+        <div class="torrent-item__body" id="torrent-body-${index}" hidden>
+          <div class="torrent-details">${torrentMetaRows(item)}</div>
+          <div class="torrent-actions">${magnetBtn}${fileBtn}</div>
         </div>
-        <div class="torrent-actions">${magnetBtn}${fileBtn}</div>
       </li>`;
+  }
+
+  function bindTorrentAccordion(slot) {
+    slot.querySelectorAll('.torrent-item__head').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const expanded = btn.getAttribute('aria-expanded') === 'true';
+        const body = btn.nextElementSibling;
+        btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+        if (body) body.hidden = expanded;
+      });
+    });
+    slot.querySelectorAll('.btn-magnet').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openMagnetLink(btn.dataset.magnet || '');
+      });
+    });
+    slot.querySelectorAll('.btn-download').forEach((btn) => {
+      btn.addEventListener('click', () => downloadTorrent(btn));
+    });
+  }
+
+  function bindTorrentsSectionToggle(slot) {
+    const toggle = slot.querySelector('.torrents-section__toggle');
+    const panel = slot.querySelector('.torrents-section__panel');
+    if (!toggle || !panel) return;
+    toggle.addEventListener('click', () => {
+      const open = toggle.getAttribute('aria-expanded') === 'true';
+      toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+      panel.hidden = open;
+      toggle.querySelector('.torrents-section__label').textContent = open
+        ? t('movie.torrentsExpand')
+        : t('movie.torrentsCollapse');
+    });
   }
 
   async function downloadTorrent(btn) {
@@ -674,7 +1118,7 @@
     if (!url) return;
     const original = btn.textContent;
     btn.disabled = true;
-    btn.textContent = t('movie.downloading') || 'Скачивание…';
+    btn.textContent = t('movie.downloading');
     try {
       const res = await fetch(`/api/torrents/download?url=${encodeURIComponent(url)}`, {
         headers: authHeaders()
@@ -692,39 +1136,64 @@
       a.remove();
       setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
     } catch {
-      toast(t('movie.downloadFailed') || 'Не удалось скачать торрент');
+      toast(t('movie.downloadFailed'));
     } finally {
       btn.disabled = false;
       btn.textContent = original;
     }
   }
 
-  // ── Торренты (Rutor). Поиск по названию, кэшируется на сервере (15 мин). ──
-  async function loadTorrents(title, type) {
+  async function loadTorrents(data) {
     const slot = document.getElementById('torrents-section');
-    if (!slot || !title) return;
+    if (!slot || !data?.title) return;
+    const query = torrentSearchQuery(data);
     slot.innerHTML = `
       <section class="movie-block movie-torrents-block">
-        <h2 class="movie-block-title">${esc(t('movie.torrents') || 'Торренты')}</h2>
-        <div class="movie-torrents-status">${esc(t('common.loading') || 'Загрузка…')}</div>
+        <div class="torrents-section__header">
+          <h2 class="movie-block-title">${esc(t('movie.torrents'))}</h2>
+          <button type="button" class="torrents-section__toggle" aria-expanded="false" aria-controls="torrents-panel">
+            <span class="torrents-section__chevron" aria-hidden="true"></span>
+            <span class="torrents-section__label">${esc(t('movie.torrentsExpand'))}</span>
+          </button>
+        </div>
+        <div class="torrents-section__panel" id="torrents-panel" hidden>
+          <div class="movie-torrents-status">${esc(t('common.loading'))}</div>
+        </div>
       </section>`;
+    bindTorrentsSectionToggle(slot);
     const statusEl = slot.querySelector('.movie-torrents-status');
+    let items = [];
     try {
-      const res = await fetch(`/api/torrents/search?query=${encodeURIComponent(title)}&type=${type}`, {
+      const res = await fetch(`/api/torrents/search?query=${encodeURIComponent(query)}&type=${data.mediaType || 'movie'}`, {
         headers: authHeaders()
       });
-      const items = await res.json().catch(() => []);
+      items = await res.json().catch(() => []);
       if (!Array.isArray(items) || !items.length) {
-        statusEl.textContent = t('movie.torrentsEmpty') || 'Раздачи не найдены';
+        const fallbacks = [
+          data.meta?.originalTitle && data.meta?.year ? `${data.meta.originalTitle} ${data.meta.year}` : null,
+          data.meta?.originalTitle || null,
+          data.title || null
+        ].filter((q, i, arr) => q && arr.indexOf(q) === i && q !== query);
+        for (const alt of fallbacks) {
+          const r2 = await fetch(`/api/torrents/search?query=${encodeURIComponent(alt)}&type=${data.mediaType || 'movie'}`, {
+            headers: authHeaders()
+          });
+          const altItems = await r2.json().catch(() => []);
+          if (Array.isArray(altItems) && altItems.length) {
+            items = altItems;
+            break;
+          }
+        }
+      }
+      if (!Array.isArray(items) || !items.length) {
+        statusEl.textContent = t('movie.torrentsEmpty');
         return;
       }
-      const list = items.slice(0, 25).map(torrentRow).join('');
+      const list = items.slice(0, 25).map((item, i) => torrentRow(item, i)).join('');
       statusEl.outerHTML = `<ul class="torrent-list">${list}</ul>`;
-      slot.querySelectorAll('.btn-download').forEach((btn) => {
-        btn.addEventListener('click', () => downloadTorrent(btn));
-      });
+      bindTorrentAccordion(slot);
     } catch {
-      if (statusEl) statusEl.textContent = t('movie.torrentsError') || 'Не удалось загрузить торренты';
+      if (statusEl) statusEl.textContent = t('movie.torrentsError');
     }
   }
 
@@ -746,7 +1215,7 @@
       loadExtras(data);
       // Плеер и торренты грузим независимо (медленный скрейпинг не блокирует показ).
       loadPlayer(data.tmdbId, data.mediaType);
-      loadTorrents(data.title, data.mediaType);
+      loadTorrents(data);
     } catch (err) {
       root.innerHTML = `<p class="moviepage-error">${esc(t('movie.loadError'))}</p>`;
     }

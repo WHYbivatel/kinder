@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'movie-pwa-v51';
+const CACHE_VERSION = 'kinder-pwa-v8';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -17,6 +17,8 @@ const APP_SHELL = [
   '/theme.js',
   '/mobileShell.js',
   '/guestStore.js',
+  '/guestSwipeActions.js',
+  '/mediaCategories.js',
   '/movie.js',
   '/appShell.js',
   '/display.js',
@@ -29,6 +31,7 @@ const APP_SHELL = [
   '/battle.js',
   '/watchNowBrowser.js',
   '/discover.js',
+  '/watchedRatingModal.js',
   '/extendedFeatures.js',
   '/visualTestScenes.js',
   '/visualTest.js',
@@ -39,9 +42,10 @@ const APP_SHELL = [
   '/headerNav.js',
   '/pwa.js',
   '/auth.js',
-  '/chat.js',
   '/manifest.webmanifest',
-  '/icons/icon.svg',
+  '/icons/brand-mark.png',
+  '/icons/favicon-16.png',
+  '/icons/favicon-32.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/maskable-512.png',

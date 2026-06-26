@@ -1,7 +1,7 @@
 {
-  "name": "Мои фильмы и сериалы",
-  "short_name": "Мои фильмы",
-  "description": "Личный список фильмов и сериалов с AI-рекомендациями, тестами, битвой и свайп-подборками.",
+  "name": "Kinder",
+  "short_name": "Kinder",
+  "description": "Kinder — личный список фильмов и сериалов с AI-рекомендациями, тестами, битвой и свайп-подборками.",
   "id": "/?source=pwa",
   "start_url": "/?source=pwa",
   "scope": "/",
@@ -33,9 +33,9 @@
       "purpose": "maskable"
     },
     {
-      "src": "/icons/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/icons/favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png",
       "purpose": "any"
     }
   ],

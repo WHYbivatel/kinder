@@ -11,8 +11,11 @@
 (function () {
   'use strict';
 
+  let portraitLockSuspended = false;
+
   // ── 1. Блокировка ориентации (работает в установленном PWA / Android) ──
   function lockPortrait() {
+    if (portraitLockSuspended) return;
     try {
       const orientation = window.screen && window.screen.orientation;
       if (orientation && typeof orientation.lock === 'function') {
@@ -21,6 +24,30 @@
       }
     } catch (e) { /* не критично */ }
   }
+
+  function unlockOrientation() {
+    try {
+      const orientation = window.screen && window.screen.orientation;
+      if (orientation && typeof orientation.unlock === 'function') {
+        orientation.unlock();
+      }
+    } catch (e) { /* не критично */ }
+  }
+
+  /** В полноэкранном видеоплеере разрешаем горизонтальную ориентацию. */
+  function setPlayerFullscreen(active) {
+    portraitLockSuspended = Boolean(active);
+    document.body.classList.toggle('player-fullscreen-active', portraitLockSuspended);
+    if (portraitLockSuspended) {
+      unlockOrientation();
+    } else {
+      lockPortrait();
+    }
+  }
+
+  window.MobileShell = {
+    setPlayerFullscreen: setPlayerFullscreen
+  };
 
   lockPortrait();
   window.addEventListener('orientationchange', lockPortrait);
@@ -35,7 +62,7 @@
       '<div class="orientation-lock__inner">' +
       '<div class="orientation-lock__icon">📱</div>' +
       '<p class="orientation-lock__title" data-i18n="rotate.title">' + (window.t ? window.t('rotate.title') : 'Поверните телефон вертикально') + '</p>' +
-      '<p class="orientation-lock__text" data-i18n="rotate.text">' + (window.t ? window.t('rotate.text') : '«Мои фильмы» работают только в вертикальном режиме.') + '</p>' +
+      '<p class="orientation-lock__text" data-i18n="rotate.text">' + (window.t ? window.t('rotate.text') : 'Kinder работает только в вертикальном режиме.') + '</p>' +
       '</div>';
     document.body.appendChild(el);
   }

@@ -23,7 +23,6 @@
     catalog: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
     tests: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6"/><path d="M10 3v6.2L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 9.2V3"/><path d="M7.5 14h9"/></svg>',
     discover: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12.6 12 20l-7.5-7.4a4.7 4.7 0 0 1 0-6.7 4.7 4.7 0 0 1 6.7 0l.8.8.8-.8a4.7 4.7 0 0 1 6.7 0 4.7 4.7 0 0 1 0 6.7Z"/></svg>',
-    ai: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5Z"/></svg>',
     list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h12"/><path d="M8 12h12"/><path d="M8 18h12"/><circle cx="3.5" cy="6" r="1.2"/><circle cx="3.5" cy="12" r="1.2"/><circle cx="3.5" cy="18" r="1.2"/></svg>'
   };
 
@@ -36,27 +35,27 @@
     { id: 'catalog',  icon: ICONS.catalog,  labelKey: 'nav.catalog',  label: 'Каталог',  href: '/#catalog' },
     { id: 'discover', icon: ICONS.discover, labelKey: 'nav.swipe',    label: 'Свайп',    href: '/#discover' },
     { id: 'tests',    icon: ICONS.tests,    labelKey: 'nav.tests',    label: 'Тесты',    href: '/#tests' },
-    { id: 'ai',       icon: ICONS.ai,       labelKey: 'nav.ai',       label: 'AI',       href: '/#ai' },
     { id: 'list',     icon: ICONS.list,     labelKey: 'nav.listShort', label: 'Список',   href: '/#list' }
   ];
 
   // Экраны, между которыми переключаемся на главной странице
-  var SCREENS = ['home', 'catalog', 'tests', 'discover', 'list', 'ai'];
+  var SCREENS = ['home', 'catalog', 'tests', 'discover', 'list'];
 
   // Привязка секций главной страницы к экранам (селектор → экран).
-  // Чат (#chat-panel) показывается на экране 'ai' через CSS, отдельно.
   var SECTION_MAP = [
     ['#premiere-ribbon-section', 'home'],
+    ['#movies-stat-banner', 'home'],
     ['.hero-section', 'home'],
     ['#battle-section', 'home'],
     ['#home-collections', 'home'],
-    ['.collections-section', 'home'],
 
     ['#catalog-section', 'catalog'],
 
     ['#tests-ribbon-wrap', 'tests'],
 
     ['#discover-section', 'discover'],
+
+    ['#list-guest-prompt', 'list'],
 
     ['.movie-list-section', 'list'],
     ['.blacklist-section', 'list'],

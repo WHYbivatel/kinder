@@ -38,6 +38,17 @@
     }
   }
 
+  function renderPwaBanner(copy) {
+    const title = window.t ? window.t('pwa.installTitle') : 'Добавить Kinder на главный экран?';
+    const text = window.t ? window.t('pwa.installText') : copy;
+    const btn = window.t ? window.t('pwa.installBtn') : 'Добавить';
+    banner.querySelector('strong').textContent = title;
+    const textEl = banner.querySelector('#pwa-install-text');
+    if (textEl) textEl.textContent = text;
+    const installBtn = banner.querySelector('#pwa-install-btn');
+    if (installBtn) installBtn.textContent = btn;
+  }
+
   function createInstallBanner() {
     if (document.getElementById('pwa-install-banner')) return null;
 
@@ -47,16 +58,17 @@
     banner.setAttribute('role', 'dialog');
     banner.setAttribute('aria-live', 'polite');
     banner.innerHTML = `
-      <div class="pwa-install-icon" aria-hidden="true">🎬</div>
+      <div class="pwa-install-icon" aria-hidden="true"><img src="/icons/brand-mark.png" alt="" width="32" height="32" decoding="async"></div>
       <div class="pwa-install-copy">
-        <strong>Добавить «Мои фильмы» на главный экран?</strong>
-        <span id="pwa-install-text">Откроется как приложение: список, AI, тесты, битва и свайпы будут под рукой.</span>
+        <strong></strong>
+        <span id="pwa-install-text"></span>
       </div>
       <div class="pwa-install-actions">
-        <button type="button" id="pwa-install-btn" class="pwa-install-btn">Добавить</button>
+        <button type="button" id="pwa-install-btn" class="pwa-install-btn"></button>
         <button type="button" id="pwa-install-close" class="pwa-install-close" aria-label="Скрыть">✕</button>
       </div>
     `;
+    renderPwaBanner('');
     document.body.appendChild(banner);
 
     banner.querySelector('#pwa-install-close')?.addEventListener('click', () => {

@@ -229,6 +229,15 @@ export function buildUserTasteProfile(movies = [], prefs = {}) {
     }
   }
 
+  // Мягкие отрицательные сигналы из импортированных гостевых свайпов «Мимо».
+  for (const skip of (prefs.discoverSwipeSkips || [])) {
+    for (const g of (skip.genres || [])) {
+      addWeight(genreWeight, canonicalGenre(g), -0.35);
+    }
+    const mt = skip.mediaType || 'movie';
+    addWeight(preferredMediaTypes, mt, -0.15);
+  }
+
   likedMovies.sort((a, b) => b.weight - a.weight);
   dislikedMovies.sort((a, b) => a.weight - b.weight);
   battleChampions.sort((a, b) => b.battleStrength - a.battleStrength);

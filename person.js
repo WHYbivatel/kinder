@@ -15,7 +15,8 @@
   const personId = params.get('id');
 
   const t = (key, vars) => (window.t ? window.t(key, vars) : key);
-  const lang = () => (window.I18N ? window.I18N.tmdbLang() : 'ru');
+  const lang = () => (window.I18N ? window.I18N.getLang() : 'ru');
+  const tmdbApiLang = () => (window.I18N ? window.I18N.tmdbLang() : 'ru-RU');
 
   backBtn?.addEventListener('click', () => {
     if (history.length > 1) history.back();
@@ -193,7 +194,13 @@
         </div>
       </div>`;
     try {
-      const res = await fetch(`/api/person/${encodeURIComponent(personId)}/full?lang=${lang()}`);
+      const res = await fetch(`/api/person/${encodeURIComponent(personId)}/full?lang=${lang()}`, {
+        headers: (() => {
+          const headers = {};
+          if (window.I18N?.apiHeaders) Object.assign(headers, window.I18N.apiHeaders());
+          return headers;
+        })()
+      });
       if (!res.ok) throw new Error('TMDB');
       const data = await res.json();
       if (!data?.name) throw new Error('not found');

@@ -8,10 +8,11 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Мои фильмы">
-  <title>Битва фильмов — Мой список фильмов</title>
+  <meta name="apple-mobile-web-app-title" content="Kinder">
+  <title data-i18n="battle.pageTitle">Битва фильмов — Kinder</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="/icons/favicon-16.png" type="image/png" sizes="16x16">
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,6 +22,9 @@
   <link rel="stylesheet" href="appShell.css">
   <link rel="stylesheet" href="mobile.css">
   <script src="theme.js"></script>
+  <script src="locales/ru.js"></script>
+  <script src="locales/kk.js"></script>
+  <script src="locales/en.js"></script>
   <script src="i18n.js"></script>
   <script src="mobileShell.js"></script>
 </head>
@@ -28,46 +32,43 @@
 
   <div id="login-overlay" class="login-overlay">
     <div class="login-card">
-      <button type="button" id="login-close" class="login-close" aria-label="Закрыть">✕</button>
-      <h1>Мой список фильмов</h1>
-      <p id="login-intro" class="login-intro">Войдите по номеру телефона, чтобы устроить битву из своих фильмов.</p>
+      <button type="button" id="login-close" class="login-close" aria-label="Закрыть" data-i18n-aria="common.close">✕</button>
+      <h1 data-i18n="auth.title">Kinder</h1>
+      <p id="login-intro" class="login-intro" data-i18n="battle.loginIntro">Войдите с логином и паролем, чтобы устроить битву из своих фильмов.</p>
       <p id="open-via-server-hint" class="server-hint hidden"></p>
-      <form id="auth-phone-form" class="auth-form">
-        <input type="tel" id="auth-phone" placeholder="Номер телефона" required autocomplete="tel" inputmode="tel">
-        <button type="submit">Получить код</button>
-      </form>
-      <form id="auth-code-form" class="auth-form hidden">
-        <input type="text" id="auth-code" placeholder="Код из SMS" required autocomplete="one-time-code" inputmode="numeric" maxlength="6">
-        <button type="submit">Войти</button>
+      <form id="auth-form" class="auth-form">
+        <input type="text" id="auth-login" placeholder="Логин" required autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]{3,32}" data-i18n-placeholder="auth.loginPlaceholder">
+        <input type="password" id="auth-password" placeholder="Пароль" required autocomplete="current-password" minlength="4" data-i18n-placeholder="auth.passwordPlaceholder">
+        <button type="submit" id="auth-submit-btn" data-i18n="auth.submitLogin">Войти</button>
       </form>
       <p id="auth-error" class="auth-error"></p>
-      <p id="auth-code-hint" class="auth-hint hidden">Отправили код на <span id="auth-phone-display"></span>. <button type="button" id="auth-code-back" class="psych-inline-login">Изменить номер</button></p>
-      <p id="auth-hint-default" class="auth-hint">Без пароля. Войдём по коду из SMS. Новый номер — аккаунт создаётся автоматически.</p>
-      <button type="button" id="auth-guest-btn" class="auth-guest-btn">На главную</button>
+      <p id="auth-hint-default" class="auth-hint" data-i18n="auth.hintLogin">Логин — от 3 символов, пароль — от 4. Только латиница, цифры и _.</p>
+      <p class="auth-switch"><button type="button" id="auth-mode-toggle" data-i18n="auth.switchToRegister">Нет аккаунта? Зарегистрироваться</button></p>
+      <button type="button" id="auth-guest-btn" class="auth-guest-btn" data-i18n="battle.guestHome">На главную</button>
     </div>
   </div>
 
   <div id="app-content" class="hidden">
     <header class="app-header">
       <div class="header-inner">
-        <button type="button" id="page-back" class="header-back" aria-label="Назад">
+        <button type="button" id="page-back" class="header-back" aria-label="Назад" data-i18n-aria="common.back">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
-          <span>Назад</span>
+          <span data-i18n="common.back">‹ Назад</span>
         </button>
         <a href="/" class="header-brand header-brand-link">
-          <span class="site-logo" aria-hidden="true">🎬</span>
+          <span class="site-logo" aria-hidden="true"><img src="/icons/brand-mark.png" alt="" width="34" height="34" decoding="async"></span>
           <div class="header-brand-text">
-            <h1>Мои фильмы</h1>
+            <h1 data-i18n="nav.brand">Kinder</h1>
             <span id="user-greeting" class="user-greeting"></span>
           </div>
         </a>
-        <nav class="header-nav" aria-label="Навигация">
-          <a href="/" class="header-nav-link" data-page="home">Список</a>
-          <a href="/battle.html" class="header-nav-link" data-page="battle">Битва фильмов</a>
+        <nav class="header-nav" aria-label="Навигация" data-i18n-aria="nav.mainAria">
+          <a href="/" class="header-nav-link" data-page="home" data-i18n="nav.list">Список</a>
+          <a href="/battle.html" class="header-nav-link" data-page="battle" data-i18n="nav.battle">Битва фильмов</a>
         </nav>
         <div class="header-right">
-          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Переключить тему" aria-label="Переключить тему" aria-pressed="false"><span class="theme-toggle-icon" aria-hidden="true">🌙</span></button>
-          <a href="/account.html" class="header-avatar" id="header-avatar" title="Мой аккаунт">?</a>
+          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Переключить тему" aria-label="Переключить тему" data-i18n-title="btn.theme" data-i18n-aria="btn.theme" aria-pressed="false"><span class="theme-toggle-icon" aria-hidden="true">🌙</span></button>
+          <a href="/account.html" class="header-avatar" id="header-avatar" title="Мой аккаунт" data-i18n-title="btn.account">?</a>
         </div>
       </div>
     </header>
@@ -75,61 +76,29 @@
     <main class="page-content page-content--battle">
       <section id="battle-section" class="battle-home-section content-section battle-page-section">
         <div class="battle-hero">
-          <span class="battle-hero-glow" aria-hidden="true"></span>
-          <span class="battle-hero-badge" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/><line x1="19" y1="21" x2="21" y2="19"/><polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"/><line x1="5" y1="14" x2="9" y2="18"/><line x1="7" y1="17" x2="4" y2="20"/><line x1="3" y1="19" x2="5" y2="21"/></svg>
-          </span>
-          <h2 class="section-heading battle-hero-title">Битва фильмов</h2>
-          <p class="battle-home-desc">Выбирайте лучший фильм или сериал из пары — мы соберём ваш личный топ из того, что вы уже посмотрели.</p>
-          <button type="button" id="battle-start-btn" class="battle-start-btn">
-            <svg class="battle-start-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-            <span>Начать битву</span>
-          </button>
+          <p class="battle-eyebrow" data-i18n="battle.eyebrow">Мини-игра</p>
+          <h2 class="section-heading" data-i18n="nav.battle">Битва фильмов</h2>
+          <p class="panel-hint battle-hero-desc" data-i18n="battle.desc">Сравнивайте только фильмы с фильмами и сериалы с сериалами — из того, что вы уже посмотрели. Мы соберём ваш личный топ и покажем, что для вас действительно на первом месте.</p>
+          <ul class="battle-points">
+            <li data-i18n="battle.point1">Нужны только «Посмотрел» с оценками — ничего нового добавлять не надо</li>
+            <li data-i18n="battle.point2">Быстрая битва за пару минут или полный топ на вечер</li>
+            <li data-i18n="battle.point3">Результат сохраняется — можно вернуться к своему топу позже</li>
+          </ul>
+          <button type="button" id="battle-start-btn" class="btn-primary battle-start-btn" data-i18n="battle.start">Начать битву</button>
         </div>
-
-        <div class="battle-modes-preview">
-          <button type="button" class="battle-preview-card battle-preview-card--quick" data-open-battle aria-label="Быстрая битва">
-            <span class="battle-preview-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            </span>
-            <span class="battle-preview-text">
-              <span class="battle-preview-name">Быстрая битва</span>
-              <span class="battle-preview-desc">8 фильмов, 7 выборов — мгновенный топ-3.</span>
-            </span>
-          </button>
-          <button type="button" class="battle-preview-card battle-preview-card--full" data-open-battle aria-label="Полная битва">
-            <span class="battle-preview-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
-            </span>
-            <span class="battle-preview-text">
-              <span class="battle-preview-name">Полная битва</span>
-              <span class="battle-preview-desc">Точный рейтинг по всем просмотренным.</span>
-            </span>
-          </button>
-          <button type="button" class="battle-preview-card battle-preview-card--genre" data-open-battle aria-label="Битва по жанру">
-            <span class="battle-preview-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>
-            </span>
-            <span class="battle-preview-text">
-              <span class="battle-preview-name">Битва по жанру</span>
-              <span class="battle-preview-desc">Лучший фильм или сериал в жанре.</span>
-            </span>
-          </button>
-        </div>
-
-        <div id="battle-my-top" class="battle-home-top hidden"></div>
       </section>
     </main>
   </div>
 
+  <script src="genreI18n.js"></script>
   <script src="display.js"></script>
   <script src="battleLogic.js"></script>
+  <script src="auth.js"></script>
+  <script src="dedupeBrowser.js"></script>
   <script src="guestStore.js"></script>
   <script src="script.js"></script>
   <script src="battle.js"></script>
   <script src="headerNav.js"></script>
   <script src="pwa.js"></script>
-  <script src="auth.js"></script>
-  <script src="appShell.js"></script>
 </body>
 </html>

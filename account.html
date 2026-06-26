@@ -8,10 +8,11 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Мои фильмы">
-  <title>Профиль — Мой список фильмов</title>
+  <meta name="apple-mobile-web-app-title" content="Kinder">
+  <title data-i18n="account.pageTitle">Профиль — Kinder</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="/icons/favicon-16.png" type="image/png" sizes="16x16">
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,6 +25,9 @@
   <link rel="stylesheet" href="appShell.css">
   <link rel="stylesheet" href="mobile.css">
   <script src="theme.js"></script>
+  <script src="locales/ru.js"></script>
+  <script src="locales/kk.js"></script>
+  <script src="locales/en.js"></script>
   <script src="i18n.js"></script>
   <script src="mobileShell.js"></script>
 </head>
@@ -31,46 +35,43 @@
 
   <div id="login-overlay" class="login-overlay">
     <div class="login-card">
-      <button type="button" id="login-close" class="login-close" aria-label="Закрыть">✕</button>
-      <h1>Мой список фильмов</h1>
-      <p id="login-intro" class="login-intro">Войдите по номеру телефона, чтобы открыть профиль и сохранять прогресс.</p>
+      <button type="button" id="login-close" class="login-close" aria-label="Закрыть" data-i18n-aria="common.close">✕</button>
+      <h1 data-i18n="auth.title">Kinder</h1>
+      <p id="login-intro" class="login-intro" data-i18n="account.loginIntro">Войдите с логином и паролем, чтобы открыть профиль и сохранять прогресс.</p>
       <p id="open-via-server-hint" class="server-hint hidden"></p>
-      <form id="auth-phone-form" class="auth-form">
-        <input type="tel" id="auth-phone" placeholder="Номер телефона" required autocomplete="tel" inputmode="tel">
-        <button type="submit">Получить код</button>
-      </form>
-      <form id="auth-code-form" class="auth-form hidden">
-        <input type="text" id="auth-code" placeholder="Код из SMS" required autocomplete="one-time-code" inputmode="numeric" maxlength="6">
-        <button type="submit">Войти</button>
+      <form id="auth-form" class="auth-form">
+        <input type="text" id="auth-login" placeholder="Логин" required autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]{3,32}" data-i18n-placeholder="auth.loginPlaceholder">
+        <input type="password" id="auth-password" placeholder="Пароль" required autocomplete="current-password" minlength="4" data-i18n-placeholder="auth.passwordPlaceholder">
+        <button type="submit" id="auth-submit-btn" data-i18n="auth.submitLogin">Войти</button>
       </form>
       <p id="auth-error" class="auth-error"></p>
-      <p id="auth-code-hint" class="auth-hint hidden">Отправили код на <span id="auth-phone-display"></span>. <button type="button" id="auth-code-back" class="psych-inline-login">Изменить номер</button></p>
-      <p id="auth-hint-default" class="auth-hint">Без пароля. Войдём по коду из SMS. Новый номер — аккаунт создаётся автоматически.</p>
-      <button type="button" id="auth-guest-btn" class="auth-guest-btn">На главную</button>
+      <p id="auth-hint-default" class="auth-hint" data-i18n="auth.hintLogin">Логин — от 3 символов, пароль — от 4. Только латиница, цифры и _.</p>
+      <p class="auth-switch"><button type="button" id="auth-mode-toggle" data-i18n="auth.switchToRegister">Нет аккаунта? Зарегистрироваться</button></p>
+      <button type="button" id="auth-guest-btn" class="auth-guest-btn" data-i18n="common.home">На главную</button>
     </div>
   </div>
 
   <div id="app-content" class="hidden">
     <header class="app-header">
       <div class="header-inner">
-        <button type="button" id="page-back" class="header-back" aria-label="Назад">
+        <button type="button" id="page-back" class="header-back" aria-label="Назад" data-i18n-aria="common.back">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
-          <span>Назад</span>
+          <span data-i18n="common.back">‹ Назад</span>
         </button>
         <a href="/" class="header-brand header-brand-link">
-          <span class="site-logo" aria-hidden="true">🎬</span>
+          <span class="site-logo" aria-hidden="true"><img src="/icons/brand-mark.png" alt="" width="34" height="34" decoding="async"></span>
           <div class="header-brand-text">
-            <h1>Мои фильмы</h1>
+            <h1 data-i18n="nav.brand">Kinder</h1>
             <span id="user-greeting" class="user-greeting"></span>
           </div>
         </a>
-        <nav class="header-nav" aria-label="Навигация">
-          <a href="/" class="header-nav-link" data-page="home">Список</a>
-          <a href="/battle.html" class="header-nav-link" data-page="battle">Битва фильмов</a>
+        <nav class="header-nav" aria-label="Навигация" data-i18n-aria="nav.mainAria">
+          <a href="/" class="header-nav-link" data-page="home" data-i18n="nav.list">Список</a>
+          <a href="/battle.html" class="header-nav-link" data-page="battle" data-i18n="nav.battle">Битва фильмов</a>
         </nav>
         <div class="header-right">
-          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Переключить тему" aria-label="Переключить тему" aria-pressed="false"><span class="theme-toggle-icon" aria-hidden="true">🌙</span></button>
-          <a href="/account.html" class="header-avatar" id="header-avatar" title="Мой аккаунт">?</a>
+          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Переключить тему" aria-label="Переключить тему" data-i18n-title="btn.theme" data-i18n-aria="btn.theme" aria-pressed="false"><span class="theme-toggle-icon" aria-hidden="true">🌙</span></button>
+          <a href="/account.html" class="header-avatar" id="header-avatar" title="Мой аккаунт" data-i18n-title="btn.account">?</a>
         </div>
       </div>
     </header>
@@ -81,19 +82,19 @@
       </section>
 
       <section class="stats-section content-section">
-        <h2 class="section-heading">Статистика</h2>
+        <h2 class="section-heading" data-i18n="profile.stats">Статистика</h2>
         <div id="stats-grid" class="stats-grid"></div>
-        <h3 class="profile-subheading">Любимые жанры</h3>
+        <h3 class="profile-subheading" data-i18n="profile.favGenres">Любимые жанры</h3>
         <div id="stats-genres" class="stats-genres"></div>
       </section>
 
       <section class="content-section profile-section">
-        <h2 class="section-heading">Результаты тестов</h2>
+        <h2 class="section-heading" data-i18n="profile.testResults">Результаты тестов</h2>
         <div id="profile-tests-summary"></div>
       </section>
 
       <section class="content-section profile-logout-section">
-        <button type="button" id="logout-btn" class="logout-btn profile-logout-btn">Выйти из аккаунта</button>
+        <button type="button" id="logout-btn" class="logout-btn profile-logout-btn" data-i18n="profile.logout">Выйти из аккаунта</button>
       </section>
     </main>
   </div>
@@ -108,9 +109,11 @@
     </div>
   </div>
 
+  <script src="genreI18n.js"></script>
   <script src="display.js"></script>
   <script src="loadingUI.js"></script>
   <script src="guestStore.js"></script>
+  <script src="guestSwipeActions.js"></script>
   <script src="script.js"></script>
   <script src="features.js"></script>
   <script src="profile.js"></script>

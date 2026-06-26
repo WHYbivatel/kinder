@@ -5,16 +5,32 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import os from 'os';
+import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
 import {
-  parseLocalChat,
-  formatOpenAIError,
-  validateChatActions,
-  isMovieRelatedPrompt,
-  classifyChatIntent,
-  detectRecommendationRequest,
-  OFF_TOPIC_REPLY
-} from './localAssistant.js';
+  normalizeAppLang,
+  normalizeTmdbLanguage,
+  getRequestLang,
+  tmdbFallbackChain,
+  serverT,
+  formatOpenAIError
+} from './serverLocales.js';
+import {
+  enrichMissingRuTitles,
+  isKkAppLang,
+  mergeKkRuItem,
+  mergeKkRuList,
+  needsRuTitleFallback,
+  pickLocalizedText
+} from './tmdbKkRu.js';
+import { createRuToKkTranslator, needsRuToKkTranslation } from './ruToKkTranslate.js';
+import {
+  localizePsychQuestions,
+  localizePsychProfile,
+  localizeVisualQuestions,
+  localizeVisualProfile,
+  localizeShortVisualTests
+} from './testTranslations.js';
 import { pickRandomTitles, randomRating } from './moviePool.js';
 import { pickBestTmdbResult } from './tmdbMatch.js';
 import { resolveSearchQuery, buildTmdbSearchQueries } from './titleAliases.js';
@@ -121,132 +137,54 @@ import {
   MOOD_TMDB_GENRES,
   WATCH_NOW_LIMIT
 } from './watchNow.js';
+import {
+  detectCollectionGenres,
+  validateCollectionQuery,
+  collectionQueryErrorKey
+} from './collectionQueryValidation.js';
 
 dotenv.config();
 
+function sanitizeEnvKey(value) {
+  const key = String(value || '').trim();
+  if (!key || /^your-.+-here$/i.test(key)) return '';
+  return key;
+}
+
+process.env.OPENAI_API_KEY = sanitizeEnvKey(process.env.OPENAI_API_KEY);
+process.env.TMDB_API_KEY = sanitizeEnvKey(process.env.TMDB_API_KEY);
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+app.disable('x-powered-by');
 const PORT = Number(process.env.PORT) || 3000;
+
+const STATIC_BLOCKED_DIRS = new Set(['data', 'node_modules', 'scripts', 'scrapers']);
+const STATIC_BLOCKED_FILES = new Set([
+  'server.js', 'package.json', 'package-lock.json', '.env', '.env.example', '.gitignore'
+]);
+
+function isStaticPathBlocked(urlPath) {
+  const segments = decodeURIComponent(String(urlPath || '')).split('/').filter(Boolean);
+  if (segments.length === 0) return false;
+  if (STATIC_BLOCKED_DIRS.has(segments[0])) return true;
+  const fileName = segments[segments.length - 1];
+  if (STATIC_BLOCKED_FILES.has(fileName)) return true;
+  if (fileName.startsWith('.env')) return true;
+  if (fileName.startsWith('.') && segments[0] !== '.well-known') return true;
+  return false;
+}
+
+const corsOrigins = new Set(['https://kinder.esl.kz']);
+if (process.env.NODE_ENV !== 'production') {
+  ['http://localhost:3000', 'http://localhost:35210', 'http://127.0.0.1:3000', 'http://127.0.0.1:35210']
+    .forEach((origin) => corsOrigins.add(origin));
+}
 
 const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const MOVIES_DIR = path.join(DATA_DIR, 'movies');
 const sessions = new Map();
-
-const tools = [
-  {
-    type: 'function',
-    function: {
-      name: 'add_random_movies',
-      description: 'Добавить N случайных фильмов или сериалов из известного пула (для тестов и быстрого наполнения списка)',
-      parameters: {
-        type: 'object',
-        properties: {
-          count: { type: 'number', description: 'Сколько добавить (1–50)' },
-          status: { type: 'string', enum: ['want', 'watching', 'watched'] },
-          randomRating: { type: 'boolean', description: 'Случайная оценка 1–10 для каждого (для watched)' },
-          rating: { type: 'number', description: 'Одна оценка для всех' },
-          mediaType: { type: 'string', enum: ['movie', 'tv'] }
-        },
-        required: ['count']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'add_movies',
-      description: 'Добавить несколько фильмов или сериалов',
-      parameters: {
-        type: 'object',
-        properties: {
-          titles: { type: 'array', items: { type: 'string' } },
-          status: { type: 'string', enum: ['want', 'watching', 'watched'] },
-          mediaType: { type: 'string', enum: ['movie', 'tv'], description: 'movie = фильм, tv = сериал' },
-          rating: { type: 'number', description: 'Оценка 1–10 для всех (для watched)' },
-          genres: { type: 'array', items: { type: 'string' } },
-          tags: { type: 'array', items: { type: 'string' } }
-        },
-        required: ['titles']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'add_movie',
-      description: 'Добавить один фильм или сериал',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: 'Русское название как на HDRezka/Кинопоиске' },
-          originalTitle: { type: 'string', description: 'Оригинальное название (англ.) для поиска в TMDB, если знаете' },
-          status: { type: 'string', enum: ['want', 'watching', 'watched'] },
-          mediaType: { type: 'string', enum: ['movie', 'tv'], description: 'movie = фильм, tv = сериал' },
-          rating: { type: 'number' },
-          genres: { type: 'array', items: { type: 'string' } },
-          tags: { type: 'array', items: { type: 'string' } }
-        },
-        required: ['title', 'status']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'delete_movie',
-      description: 'Удалить фильм или сериал из списка',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          mediaType: { type: 'string', enum: ['movie', 'tv'] }
-        },
-        required: ['title']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'update_movie',
-      description: 'Изменить статус, оценку, жанры или теги фильма/сериала',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          mediaType: { type: 'string', enum: ['movie', 'tv'] },
-          status: { type: 'string', enum: ['want', 'watching', 'watched'] },
-          rating: { type: 'number' },
-          genres: { type: 'array', items: { type: 'string' } },
-          tags: { type: 'array', items: { type: 'string' } }
-        },
-        required: ['title']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'update_movie_notes',
-      description: 'Обновить заметки к фильму',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          mediaType: { type: 'string', enum: ['movie', 'tv'] },
-          personal: { type: 'string' },
-          liked: { type: 'string' },
-          disliked: { type: 'string' },
-          favoriteScene: { type: 'string' },
-          rewatch: { type: 'string' },
-          review: { type: 'string' }
-        },
-        required: ['title']
-      }
-    }
-  }
-];
 
 function ensureDataDirs() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
@@ -268,6 +206,10 @@ function findCanonicalUsername(users, username) {
   if (users[requested]) return requested;
   const lower = requested.toLowerCase();
   return Object.keys(users).find((name) => name.toLowerCase() === lower) || null;
+}
+
+function isValidLogin(username) {
+  return /^[a-zA-Z0-9_]{3,32}$/.test(String(username || '').trim());
 }
 
 function hashPassword(password, salt) {
@@ -850,13 +792,9 @@ function saveVisualTestResult(prefs, result) {
 
 const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS) || 30000;
 
-async function callOpenAI(apiKey, messages, useTools = true) {
+async function callOpenAI(apiKey, messages) {
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
   const body = { model, messages };
-  if (useTools) {
-    body.tools = tools;
-    body.tool_choice = 'auto';
-  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
@@ -891,33 +829,41 @@ async function callOpenAI(apiKey, messages, useTools = true) {
   return data.choices[0].message;
 }
 
-function getLastUserMessage(messages) {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'user') return messages[i].content;
+let ruToKkTranslator;
+function getRuToKk() {
+  if (!ruToKkTranslator) {
+    ruToKkTranslator = createRuToKkTranslator({
+      getApiKey: () => process.env.OPENAI_API_KEY,
+      callOpenAI
+    });
   }
-  return '';
+  return ruToKkTranslator;
 }
 
-function handleOpenAIFailure(error, movies, userText) {
-  // ВАЖНО: локальный фолбэк применяем ТОЛЬКО если он даёт реальные действия
-  // (add/delete/update). «show»-результат parseLocalChat слишком жадный и при
-  // сбое OpenAI выдавал «Найдено N: …» (весь список) на запрос «посоветуй …».
-  // Настоящие list-команды до OpenAI не доходят (отрабатывают в /api/chat
-  // раньше), поэтому здесь текстовый show-результат — это почти всегда ложное
-  // срабатывание, которое показывать нельзя.
-  const local = parseLocalChat(userText, movies);
-  if (local && (local.actions || []).length > 0) {
-    return {
-      reply: `${error.openai?.message || error.message}\n\nЯ выполнил команду локально:\n${local.reply}`,
-      actions: local.actions
-    };
-  }
-
-  return {
-    reply: error.openai?.message || error.message || 'Ошибка OpenAI',
-    actions: []
-  };
+async function localizeKkOverview(kkOverview, ruOverview) {
+  return getRuToKk().localizeOverview(kkOverview, ruOverview);
 }
+
+async function localizeKkOverviewsInResults(kkResults, ruById) {
+  if (!Array.isArray(kkResults) || !kkResults.length) return kkResults;
+  const merged = kkResults.map((item) => mergeKkRuItem(item, ruById?.get(item.id)));
+  const texts = new Set();
+  const slots = merged.map((item, index) => {
+    const raw = kkResults[index];
+    const ru = ruById?.get(item.id);
+    const { needed, text } = needsRuToKkTranslation(raw?.overview, ru?.overview);
+    if (needed && text) texts.add(text);
+    return { needed, text, index };
+  });
+  if (!texts.size) return merged;
+  const translated = await getRuToKk().translateBatch([...texts]);
+  return merged.map((item, index) => {
+    const slot = slots[index];
+    if (!slot.needed || !slot.text) return item;
+    return { ...item, overview: translated.get(slot.text) || slot.text };
+  });
+}
+
 
 const TMDB_TIMEOUT_MS = Number(process.env.TMDB_TIMEOUT_MS) || 4000;
 
@@ -946,10 +892,8 @@ async function tmdbFetch(endpoint, params = {}, options = {}) {
   return response.json();
 }
 
-// Язык TMDB-описаний/названий → формат API.
-function normalizeTmdbLanguage(lang) {
-  return lang === 'en' || lang === 'en-US' ? 'en-US' : 'ru-RU';
-}
+// Язык TMDB-описаний/названий → формат API (см. serverLocales.js).
+// normalizeTmdbLanguage импортирован из serverLocales.js
 
 /* Обёртка над tmdbFetch, привязанная к языку пользователя. Все запросы,
    которые отдают отображаемые названия/описания (discover, trending, similar,
@@ -959,12 +903,49 @@ function normalizeTmdbLanguage(lang) {
    Явно заданный options.language имеет приоритет (напр. поиск ключевых слов
    принудительно en-US). */
 function makeLocalizedTmdbFetch(lang) {
+  const appLang = normalizeAppLang(lang);
   const language = normalizeTmdbLanguage(lang);
-  return (endpoint, params = {}, options = {}) => {
+
+  if (appLang !== 'kk') {
+    return (endpoint, params = {}, options = {}) => {
+      if (typeof endpoint === 'string' && endpoint.startsWith('/genre/')) {
+        return tmdbFetch(endpoint, params, { ...options, language: 'ru-RU' });
+      }
+      return tmdbFetch(endpoint, params, { ...options, language: options.language || language });
+    };
+  }
+
+  // Казахский UI: TMDB kk часто отдаёт английские названия — подмешиваем ru-RU.
+  return async (endpoint, params = {}, options = {}) => {
     if (typeof endpoint === 'string' && endpoint.startsWith('/genre/')) {
       return tmdbFetch(endpoint, params, { ...options, language: 'ru-RU' });
     }
-    return tmdbFetch(endpoint, params, { ...options, language: options.language || language });
+    const forced = options.language;
+    if (forced && forced !== 'kk-KZ') {
+      return tmdbFetch(endpoint, params, options);
+    }
+    const [kkData, ruData] = await Promise.all([
+      tmdbFetch(endpoint, params, { ...options, language: 'kk-KZ' }),
+      tmdbFetch(endpoint, params, { ...options, language: 'ru-RU' })
+    ]);
+    if (kkData?.results) {
+      const ruById = new Map((ruData?.results || []).map((r) => [r.id, r]));
+      let results = await localizeKkOverviewsInResults(kkData.results, ruById);
+      results = await enrichMissingRuTitles(results, endpoint, tmdbFetch);
+      return { ...kkData, results };
+    }
+    if (kkData?.id && (kkData.title != null || kkData.name != null)) {
+      let merged = mergeKkRuItem(kkData, ruData);
+      if (needsRuTitleFallback(merged)) {
+        const mediaType = /\/tv(\/|$)/.test(endpoint) ? 'tv' : 'movie';
+        const ruDetail = (ruData?.id === kkData.id ? ruData : null)
+          || await tmdbFetch(`/${mediaType}/${kkData.id}`, {}, { language: 'ru-RU' });
+        if (ruDetail) merged = mergeKkRuItem(kkData, ruDetail);
+      }
+      merged.overview = await localizeKkOverview(kkData?.overview, ruData?.overview);
+      return merged;
+    }
+    return kkData || ruData;
   };
 }
 
@@ -1019,6 +1000,7 @@ function mapSearchResult(m, mediaType = 'movie') {
     releaseDate: date,
     overview: m.overview?.slice(0, 120),
     poster: tmdbPosterFromPath(m.poster_path, 'w780'),
+    voteAverage: m.vote_average || 0,
     voteCount: m.vote_count || 0,
     mediaType
   };
@@ -1113,7 +1095,9 @@ function mapTmdbMovie(movie, credits, matchSource = 'auto', externalRatings = nu
 // дорисовывает на странице. Так страница открывается сразу, без ожидания скрейпа.
 const tmdbCoreCache = new Map();   // только TMDB-данные (быстро)
 const tmdbExtrasCache = new Map(); // рейтинги IMDb/КП + Kinogo (медленно)
+const tmdbUpcomingPremieresCache = new Map(); // lang → сырой список TMDB upcoming
 const TMDB_DETAILS_TTL_MS = 30 * 60 * 1000;
+const TMDB_UPCOMING_PREMIERES_TTL_MS = 30 * 60 * 1000;
 
 function cacheGet(cache, key) {
   const entry = cache.get(key);
@@ -1126,6 +1110,34 @@ function cacheSet(cache, key, data) {
   if (cache.size > 300) cache.delete(cache.keys().next().value);
 }
 
+// TMDB-описание: kk → ru, en → ru, ru → en (см. tmdbFallbackChain).
+async function fetchTmdbLocalizedMovie(endpoint, fetchOpts, language) {
+  const appLang = normalizeAppLang(language);
+  if (appLang === 'kk') {
+    const [kkMovie, ruMovie] = await Promise.all([
+      tmdbFetch(endpoint, fetchOpts, { language: 'kk-KZ' }),
+      tmdbFetch(endpoint, fetchOpts, { language: 'ru-RU' })
+    ]);
+    const merged = mergeKkRuItem(kkMovie, ruMovie);
+    if (!merged) return kkMovie || ruMovie || null;
+    merged.overview = await localizeKkOverview(kkMovie?.overview, ruMovie?.overview);
+    return merged;
+  }
+
+  const primaryLang = normalizeTmdbLanguage(language);
+  const movie = await tmdbFetch(endpoint, fetchOpts, { language: primaryLang });
+  if (!movie) return null;
+  if ((movie.overview || '').trim()) return movie;
+
+  for (const fbLang of tmdbFallbackChain(language).slice(1)) {
+    const fb = await tmdbFetch(endpoint, fetchOpts, { language: fbLang });
+    if ((fb?.overview || '').trim()) {
+      return { ...movie, overview: fb.overview };
+    }
+  }
+  return movie;
+}
+
 // Нормализуем язык интерфейса (ru|en) в формат TMDB (ru-RU|en-US).
 // «Ядро» — только TMDB, без внешнего скрейпинга. Быстро и кэшируется.
 // language — язык описания/названий из TMDB (зависит от выбора пользователя).
@@ -1136,13 +1148,14 @@ async function loadTmdbCore(tmdbId, mediaType = 'movie', language = 'ru-RU') {
   if (cached) return cached;
 
   const endpoint = mediaType === 'tv' ? `/tv/${tmdbId}` : `/movie/${tmdbId}`;
-  const movie = await tmdbFetch(endpoint, {
+  const fetchOpts = {
     append_to_response: 'credits,external_ids,videos',
     include_video_language: 'ru,en,null'
-  }, { language: lang });
+  };
+
+  const movie = await fetchTmdbLocalizedMovie(endpoint, fetchOpts, language);
   if (!movie) return null;
 
-  // Маппим без внешних рейтингов (передаём null) — добавим их позже.
   const mapped = mapTmdbMovie(movie, movie.credits, 'auto', null, mediaType, lang);
   mapped._raw = {
     imdbId: movie.imdb_id || movie.external_ids?.imdb_id || null,
@@ -1151,6 +1164,58 @@ async function loadTmdbCore(tmdbId, mediaType = 'movie', language = 'ru-RU') {
   };
   cacheSet(tmdbCoreCache, cacheKey, mapped);
   return mapped;
+}
+
+// Лёгкая загрузка названия/описания/жанров — без credits/videos (для /api/titles/localize).
+async function loadTmdbBrief(tmdbId, mediaType = 'movie', language = 'ru-RU') {
+  const lang = normalizeTmdbLanguage(language);
+  const cacheKey = `brief:${mediaType}:${tmdbId}:${lang}`;
+  const cached = cacheGet(tmdbCoreCache, cacheKey);
+  if (cached) return cached;
+
+  const endpoint = mediaType === 'tv' ? `/tv/${tmdbId}` : `/movie/${tmdbId}`;
+  const movie = await fetchTmdbLocalizedMovie(endpoint, {}, language);
+  if (!movie) return null;
+
+  const brief = {
+    title: movie.title || movie.name || null,
+    overview: (movie.overview || '').trim(),
+    genres: (movie.genres || []).map((g) => g.name).filter(Boolean)
+  };
+  cacheSet(tmdbCoreCache, cacheKey, brief);
+  return brief;
+}
+
+// Кэшированный список upcoming без enrichMissingRuTitles (N+1 запросов к TMDB).
+async function fetchTmdbUpcomingForPremieres(appLang) {
+  const key = normalizeAppLang(appLang);
+  const entry = tmdbUpcomingPremieresCache.get(key);
+  if (entry && Date.now() - entry.at < TMDB_UPCOMING_PREMIERES_TTL_MS) {
+    return entry.data;
+  }
+
+  let movieData;
+  if (key === 'kk') {
+    const [kkData, ruData] = await Promise.all([
+      tmdbFetch('/movie/upcoming', { region: 'RU' }, { language: 'kk-KZ' }),
+      tmdbFetch('/movie/upcoming', { region: 'RU' }, { language: 'ru-RU' })
+    ]);
+    movieData = mergeKkRuList(kkData, ruData);
+  } else {
+    const tmdbLang = normalizeTmdbLanguage(appLang);
+    movieData = await tmdbFetch('/movie/upcoming', { region: 'RU' }, { language: tmdbLang });
+  }
+
+  const results = movieData?.results || [];
+  // Не кэшируем сбой TMDB (movieData === null) — иначе пустая лента
+  // премьер может «залипнуть» на 30 минут до перезапуска сервера.
+  if (movieData) {
+    tmdbUpcomingPremieresCache.set(key, { at: Date.now(), data: results });
+    if (tmdbUpcomingPremieresCache.size > 20) {
+      tmdbUpcomingPremieresCache.delete(tmdbUpcomingPremieresCache.keys().next().value);
+    }
+  }
+  return results;
 }
 
 // «Доп-данные» — медленный скрейпинг рейтингов и ссылки на Kinogo. Кэшируется.
@@ -1190,8 +1255,8 @@ async function loadTmdbExtras(core, mediaType = 'movie') {
 
 // Полные детали (ядро + доп-данные) — для внутренних потребителей (добавление
 // фильма, импорт и т.п.), которым нужны рейтинги в одном объекте.
-async function loadTmdbDetails(tmdbId, mediaType = 'movie') {
-  const core = await loadTmdbCore(tmdbId, mediaType);
+async function loadTmdbDetails(tmdbId, mediaType = 'movie', language = 'ru-RU') {
+  const core = await loadTmdbCore(tmdbId, mediaType, language);
   if (!core) return null;
   const extras = await loadTmdbExtras(core, mediaType);
   if (extras) {
@@ -1305,7 +1370,7 @@ async function resolveMovieForAdd(title, mediaType = 'movie', options = {}) {
 
   if (!hit?.tmdbId) return { title: trimmed, unresolved: true, mediaType };
 
-  const details = await loadTmdbDetails(hit.tmdbId, mediaType);
+  const details = await loadTmdbDetails(hit.tmdbId, mediaType, options.language);
   if (!details) return { title: trimmed, unresolved: true, mediaType };
 
   return {
@@ -1333,86 +1398,6 @@ function appendUnresolvedNotice(reply, unresolvedTitles) {
   return `${reply || 'Готово!'}${notice}`;
 }
 
-async function finalizeChatResponse(reply, actions, movies = []) {
-  const { actions: validatedActions, ratingAsk } = validateChatActions(actions || []);
-  const { actions: enrichedActions, unresolvedTitles } = validatedActions.length
-    ? await enrichChatActions(validatedActions, movies)
-    : { actions: [], unresolvedTitles: [] };
-  return {
-    reply: ratingAsk || appendUnresolvedNotice(reply, unresolvedTitles),
-    actions: enrichedActions
-  };
-}
-
-async function enrichChatActions(actions, movies = []) {
-  const enriched = [];
-  const unresolvedTitles = [];
-
-  for (const action of actions || []) {
-    if (action.type === 'add_random_movies') {
-      const count = Math.min(50, Math.max(1, Number(action.count) || 1));
-      const mediaType = action.mediaType || 'movie';
-      const titles = pickRandomTitles(movies, count, mediaType);
-      const wantsRandomRating = Boolean(action.randomRating);
-      let status = action.status || 'want';
-      if (wantsRandomRating && status !== 'watching') status = 'watched';
-
-      for (const title of titles) {
-        let rating = null;
-        if (status === 'watched') {
-          rating = wantsRandomRating ? randomRating() : (action.rating ?? null);
-          if (rating === null && wantsRandomRating) rating = randomRating();
-        } else if (action.rating != null) {
-          rating = action.rating;
-        }
-
-        const resolved = await resolveMovieForAdd(title, mediaType, {
-          originalTitle: resolveSearchQuery(title)
-        });
-        if (resolved.unresolved) unresolvedTitles.push(title);
-        enriched.push({
-          type: 'add_movie',
-          title: resolved.title || title,
-          status,
-          rating,
-          tmdbId: resolved.tmdbId,
-          mediaType: resolved.mediaType || mediaType,
-          meta: resolved.meta,
-          unresolved: resolved.unresolved,
-          unresolvedTitles: resolved.unresolved ? [title] : []
-        });
-      }
-      continue;
-    }
-
-    if (action.type === 'add_movies' && action.titles?.length) {
-      const patched = { ...action };
-      if (patched.randomRating || (patched.rating != null && !patched.status)) {
-        patched.status = 'watched';
-      }
-      const resolved = await resolveMoviesForAdd(patched.titles, patched.mediaType || 'movie');
-      resolved.forEach((item, index) => {
-        if (item.unresolved) unresolvedTitles.push(patched.titles[index]);
-      });
-      enriched.push({ ...patched, resolved, unresolvedTitles });
-    } else if (action.type === 'add_movie' && action.title) {
-      const resolved = await resolveMovieForAdd(action.title, action.mediaType || 'movie', {
-        originalTitle: action.originalTitle || resolveSearchQuery(action.title)
-      });
-      if (resolved.unresolved) unresolvedTitles.push(action.title);
-      enriched.push({
-        ...action,
-        ...resolved,
-        title: resolved.title || action.title,
-        unresolvedTitles: resolved.unresolved ? [action.title] : []
-      });
-    } else {
-      enriched.push(action);
-    }
-  }
-
-  return { actions: enriched, unresolvedTitles };
-}
 
 async function enrichPremiereSuggestion(item) {
   const enriched = await enrichMovieSuggestion(item);
@@ -1704,7 +1689,8 @@ function filterFreshRecommendations(items, movies, excludeTitles = []) {
   });
 }
 
-async function discoverTmdbRecommendationCandidates(movies, limit, excludeTitles = []) {
+async function discoverTmdbRecommendationCandidates(movies, limit, excludeTitles = [], language = 'ru') {
+  const localizedFetch = makeLocalizedTmdbFetch(language);
   const blockedTitles = new Set([
     ...movies.map((movie) => movie.title),
     ...movies.map((movie) => movie.meta?.originalTitle),
@@ -1715,7 +1701,7 @@ async function discoverTmdbRecommendationCandidates(movies, limit, excludeTitles
   for (const mediaType of ['movie', 'tv']) {
     const discoverPath = mediaType === 'tv' ? '/discover/tv' : '/discover/movie';
     for (let page = 1; page <= 5 && picks.length < limit; page += 1) {
-      const data = await tmdbFetch(discoverPath, {
+      const data = await localizedFetch(discoverPath, {
         sort_by: 'popularity.desc',
         include_adult: 'false',
         'vote_count.gte': 120,
@@ -1810,7 +1796,8 @@ async function enrichRecommendations(recommendations, movies = [], options = {})
   const topUp = await discoverTmdbRecommendationCandidates(
     movies,
     limit - fresh.length,
-    [...(options.excludeTitles || []), ...fresh.map((item) => item.title)]
+    [...(options.excludeTitles || []), ...fresh.map((item) => item.title)],
+    options.language || 'ru'
   );
   const withTmdb = filterFreshRecommendations([...fresh, ...topUp], movies, options.excludeTitles || []);
   if (withTmdb.length >= limit) return finalize(withTmdb);
@@ -1939,9 +1926,20 @@ async function enrichTitleItems(items) {
 ensureDataDirs();
 initGlobalSignals(DATA_DIR);
 
-app.use(cors());
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || corsOrigins.has(origin)) callback(null, true);
+    else callback(null, false);
+  }
+}));
 app.use(express.json({ limit: '25mb' }));
-app.use(express.static(__dirname));
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  if (req.path.startsWith('/api/')) return next();
+  if (isStaticPathBlocked(req.path)) return res.sendStatus(404);
+  next();
+});
+app.use(express.static(__dirname, { dotfiles: 'deny', index: ['index.html'] }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
@@ -1970,18 +1968,27 @@ app.get('/api/interactions/top', (req, res) => {
 app.post('/api/register', (req, res) => {
   const username = String(req.body?.username || '').trim();
   const { password } = req.body;
+  const deviceId = String(req.body?.deviceId || '').trim();
   if (!username || !password) return res.status(400).json({ error: 'Введите логин и пароль' });
-  if (username.length < 3) return res.status(400).json({ error: 'Логин — минимум 3 символа' });
+  if (!isValidLogin(username)) {
+    return res.status(400).json({ error: 'Логин: 3–32 символа, только латиница, цифры и _' });
+  }
   if (password.length < 4) return res.status(400).json({ error: 'Пароль — минимум 4 символа' });
 
   const users = loadUsers();
   if (findCanonicalUsername(users, username)) {
-    return res.status(400).json({ error: 'Пользователь уже существует' });
+    return res.status(409).json({ error: 'Логин уже занят' });
   }
 
   const salt = crypto.randomBytes(16).toString('hex');
   const now = new Date().toISOString();
-  users[username] = { salt, hash: hashPassword(password, salt), registeredAt: now, lastActiveAt: now };
+  users[username] = {
+    salt,
+    hash: hashPassword(password, salt),
+    registeredAt: now,
+    lastActiveAt: now,
+    devices: deviceId ? [deviceId] : []
+  };
   saveUsers(users);
   initUserMovies(username);
 
@@ -2034,49 +2041,12 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-// Вход/регистрация только по email — без пароля. Если email новый, аккаунт
-// создаётся автоматически. Устройство привязывается для тихого входа потом.
-// Старые /api/login и /api/register остаются для совместимости.
+// Вход/регистрация по email отключены — используйте логин и пароль.
 app.post('/api/auth', (req, res) => {
-  const email = String(req.body?.email || req.body?.name || '').trim().toLowerCase();
-  const deviceId = String(req.body?.deviceId || '').trim();
-
-  if (!email) return res.status(400).json({ error: 'Введите email' });
-  if (!isValidEmail(email)) return res.status(400).json({ error: 'Введите корректный email' });
-
-  const users = loadUsers();
-  const existing = findCanonicalUsername(users, email);
-  const now = new Date().toISOString();
-
-  if (existing) {
-    const user = users[existing];
-    bindDevice(user, deviceId);
-    user.lastActiveAt = now;
-    if (!user.email) user.email = existing;
-    saveUsers(users);
-    return res.json({ token: createSession(existing), username: existing, created: false });
-  }
-
-  // Новый аккаунт: email как идентификатор, без пароля.
-  users[email] = {
-    email,
-    registeredAt: now,
-    lastActiveAt: now,
-    devices: deviceId ? [deviceId] : []
-  };
-  saveUsers(users);
-  initUserMovies(email);
-  res.json({ token: createSession(email), username: email, created: true });
+  res.status(410).json({ error: 'Вход по email отключён. Используйте логин и пароль.' });
 });
 
-// ── Вход по номеру телефона + SMS-код ──────────────────────────────
-// Сейчас SMS не отправляется реально: используется временный код 1234.
-// Структура готова к подключению реального провайдера: достаточно
-// реализовать sendSmsCode() и хранить/проверять сгенерированный код.
-const MOCK_SMS_CODE = '1234';
-const SMS_CODE_TTL_MS = 5 * 60 * 1000; // 5 минут
-const smsCodes = new Map(); // phone -> { code, expiresAt }
-
+// ── Вход по номеру телефона (без пароля и SMS) ─────────────────────
 // Нормализация телефона в единый идентификатор: оставляем цифры и ведущий «+».
 function normalizePhone(raw) {
   let value = String(raw || '').trim();
@@ -2097,85 +2067,25 @@ function findUserByPhone(users, phone) {
   return Object.keys(users).find((name) => users[name]?.phone === phone) || null;
 }
 
-// Заглушка отправки SMS. В реальной интеграции здесь будет вызов провайдера
-// (Twilio/SMS.ru/Vonage и т.п.) и генерация случайного кода через crypto.
-// Возвращает код, который «отправлен» пользователю.
-function sendSmsCode(phone) {
-  const code = MOCK_SMS_CODE;
-  smsCodes.set(phone, { code, expiresAt: Date.now() + SMS_CODE_TTL_MS });
-  // TODO: подключить реального SMS-провайдера и отправить `code` на `phone`.
-  return code;
-}
-
-function verifySmsCode(phone, code) {
-  const entry = smsCodes.get(phone);
-  const cleaned = String(code || '').trim();
-  if (entry && entry.expiresAt > Date.now() && entry.code === cleaned) return true;
-  // Совместимость/упрощение на время разработки: фиксированный код всегда подходит.
-  if (cleaned === MOCK_SMS_CODE) return true;
-  return false;
-}
-
-// Шаг 1: запросить код. Реальная отправка пока не выполняется (mock 1234).
-app.post('/api/auth/request-code', (req, res) => {
-  const phone = normalizePhone(req.body?.phone);
-  if (!phone) return res.status(400).json({ error: 'Введите номер телефона' });
-  if (!isValidPhone(phone)) return res.status(400).json({ error: 'Введите корректный номер телефона' });
-
-  sendSmsCode(phone);
-  // devCode отдаём только чтобы было видно, что используется mock-код.
-  res.json({ success: true, phone, devCode: MOCK_SMS_CODE });
-});
-
-// Шаг 2: проверить код и войти/создать аккаунт по номеру телефона.
-app.post('/api/auth/verify-code', (req, res) => {
-  const phone = normalizePhone(req.body?.phone);
-  const code = String(req.body?.code || '').trim();
-  const deviceId = String(req.body?.deviceId || '').trim();
-
-  if (!phone || !isValidPhone(phone)) return res.status(400).json({ error: 'Введите корректный номер телефона' });
-  if (!code) return res.status(400).json({ error: 'Введите код из SMS' });
-  if (!verifySmsCode(phone, code)) return res.status(401).json({ error: 'Неверный код. Попробуйте ещё раз.' });
-
-  smsCodes.delete(phone);
-
-  const users = loadUsers();
-  const existing = findUserByPhone(users, phone);
-  const now = new Date().toISOString();
-
-  if (existing) {
-    const user = users[existing];
-    bindDevice(user, deviceId);
-    user.lastActiveAt = now;
-    if (!user.phone) user.phone = phone;
-    saveUsers(users);
-    return res.json({ token: createSession(existing), username: existing, phone, created: false });
-  }
-
-  // Новый аккаунт: номер телефона — основной идентификатор.
-  users[phone] = {
-    phone,
-    registeredAt: now,
-    lastActiveAt: now,
-    devices: deviceId ? [deviceId] : []
-  };
-  saveUsers(users);
-  initUserMovies(phone);
-  res.json({ token: createSession(phone), username: phone, phone, created: true });
+// Вход по номеру телефона отключён — используйте логин и пароль.
+app.post('/api/auth/phone', (req, res) => {
+  res.status(410).json({ error: 'Вход по номеру телефона отключён. Используйте логин и пароль.' });
 });
 
 app.post('/api/login', (req, res) => {
   const requestedUsername = String(req.body?.username || '').trim();
   const { password } = req.body;
+  const deviceId = String(req.body?.deviceId || '').trim();
   if (!requestedUsername || !password) return res.status(400).json({ error: 'Введите логин и пароль' });
 
   const users = loadUsers();
   const username = findCanonicalUsername(users, requestedUsername);
   const user = users[username];
-  if (!user || user.hash !== hashPassword(password, user.salt)) {
+  if (!user || !user.salt || !user.hash || user.hash !== hashPassword(password, user.salt)) {
     return res.status(401).json({ error: 'Неверный логин или пароль' });
   }
 
+  bindDevice(user, deviceId);
   user.lastActiveAt = new Date().toISOString();
   saveUsers(users);
 
@@ -2275,6 +2185,218 @@ app.post('/api/movies/add', async (req, res) => {
   res.json({ success: true, added: true, movie: newMovie });
 });
 
+function guestSwipeActionKey(action) {
+  if (action?.key) return String(action.key);
+  const mediaType = action?.mediaType === 'tv' ? 'tv' : 'movie';
+  if (action?.tmdbId) return `${mediaType}:tmdb:${Number(action.tmdbId)}`;
+  const title = String(action?.title || '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return title ? `${mediaType}:title:${title}` : null;
+}
+
+function normalizeGuestSwipeAction(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const action = ['like', 'watched', 'skip'].includes(raw.action) ? raw.action : null;
+  if (!action) return null;
+  const title = typeof raw.title === 'string' ? raw.title.trim().slice(0, 200) : '';
+  if (!title && !raw.tmdbId) return null;
+  const normalized = {
+    key: guestSwipeActionKey(raw),
+    tmdbId: Number(raw.tmdbId) || null,
+    mediaType: raw.mediaType === 'tv' ? 'tv' : 'movie',
+    title,
+    originalTitle: typeof raw.originalTitle === 'string' ? raw.originalTitle.slice(0, 200) : null,
+    poster: typeof raw.poster === 'string' ? raw.poster.slice(0, 500) : null,
+    year: Number(raw.year) || null,
+    genres: Array.isArray(raw.genres) ? raw.genres.slice(0, 12).map((g) => String(g)) : [],
+    originalLanguage: typeof raw.originalLanguage === 'string' ? raw.originalLanguage.slice(0, 8) : null,
+    action,
+    source: 'discover',
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString()
+  };
+  if (!normalized.key) normalized.key = guestSwipeActionKey(normalized);
+  return normalized.key ? normalized : null;
+}
+
+async function importGuestSwipeActions(username, rawActions) {
+  const actions = (Array.isArray(rawActions) ? rawActions : [])
+    .map(normalizeGuestSwipeAction)
+    .filter(Boolean);
+
+  if (!actions.length) {
+    return { importedKeys: [], stats: {}, partial: false };
+  }
+
+  const data = loadUserMovies(username);
+  const movies = Array.isArray(data.movies) ? [...data.movies] : [];
+  let nextId = data.nextId || 1;
+  const prefs = loadUserPrefs(DATA_DIR, username);
+  if (!Array.isArray(prefs.discoverSwipeSkips)) prefs.discoverSwipeSkips = [];
+
+  const existingByKey = new Map();
+  for (const movie of movies) {
+    const key = normalizeMovieKey(movie);
+    if (key) existingByKey.set(key, movie);
+  }
+
+  const skipKeys = new Set(
+    prefs.discoverSwipeSkips.map((s) => guestSwipeActionKey(s)).filter(Boolean)
+  );
+
+  const importedKeys = [];
+  const failedKeys = [];
+  const stats = {
+    wantAdded: 0,
+    wantUpgraded: 0,
+    watchedAdded: 0,
+    skips: 0,
+    unchanged: 0
+  };
+
+  for (const action of actions) {
+    const key = action.key || guestSwipeActionKey(action);
+    if (!key) {
+      failedKeys.push('unknown');
+      continue;
+    }
+
+    try {
+      if (action.action === 'skip') {
+        const inList = existingByKey.get(key);
+        if (inList) {
+          importedKeys.push(key);
+          stats.unchanged += 1;
+          continue;
+        }
+        if (!skipKeys.has(key)) {
+          prefs.discoverSwipeSkips.push({
+            tmdbId: action.tmdbId,
+            mediaType: action.mediaType,
+            title: action.title,
+            genres: action.genres,
+            at: action.createdAt
+          });
+          skipKeys.add(key);
+          stats.skips += 1;
+        }
+        importedKeys.push(key);
+        continue;
+      }
+
+      const targetStatus = action.action === 'watched' ? 'watched' : 'want';
+      const existing = existingByKey.get(key);
+
+      if (existing) {
+        if (action.action === 'like') {
+          importedKeys.push(key);
+          stats.unchanged += 1;
+          continue;
+        }
+        if (existing.status === 'watched') {
+          importedKeys.push(key);
+          stats.unchanged += 1;
+          continue;
+        }
+        const prevStatus = existing.status || 'want';
+        existing.status = 'watched';
+        existing.watchedAt = existing.watchedAt || action.createdAt || new Date().toISOString();
+        existing.history = Array.isArray(existing.history) ? existing.history : [];
+        existing.history.push({
+          type: 'status',
+          from: prevStatus,
+          to: 'watched',
+          at: action.createdAt || new Date().toISOString(),
+          source: 'discover_import'
+        });
+        importedKeys.push(key);
+        stats.wantUpgraded += 1;
+        continue;
+      }
+
+      let details = null;
+      if (action.tmdbId) {
+        try { details = await loadTmdbDetails(action.tmdbId, action.mediaType); } catch { details = null; }
+      }
+
+      const now = action.createdAt || new Date().toISOString();
+      const usedIds = new Set(movies.map((m) => m.id).filter(isValidMovieId));
+      const newId = nextFreeMovieId(usedIds, nextId);
+      nextId = Math.max(nextId, newId + 1);
+
+      const newMovie = {
+        id: newId,
+        title: details?.title || action.title,
+        mediaType: action.mediaType,
+        tmdbId: action.tmdbId || details?.tmdbId || null,
+        status: targetStatus,
+        rating: null,
+        genres: details?.genres || action.genres || [],
+        tags: [],
+        addedAt: now,
+        watchedAt: targetStatus === 'watched' ? now : null,
+        history: [{ type: 'added', status: targetStatus, at: now, source: 'discover_import' }],
+        meta: {
+          ...(details?.meta || {}),
+          poster: details?.meta?.poster || action.poster || null,
+          year: details?.year || action.year || null,
+          originalTitle: details?.originalTitle || action.originalTitle || null,
+          originalLanguage: details?.meta?.originalLanguage || action.originalLanguage || null
+        },
+        notes: {}
+      };
+
+      movies.push(newMovie);
+      existingByKey.set(key, newMovie);
+      if (targetStatus === 'watched') stats.watchedAdded += 1;
+      else stats.wantAdded += 1;
+      importedKeys.push(key);
+    } catch {
+      failedKeys.push(key);
+    }
+  }
+
+  if (prefs.discoverSwipeSkips.length > 150) {
+    prefs.discoverSwipeSkips = prefs.discoverSwipeSkips.slice(-150);
+  }
+
+  const repaired = repairMovieIds(movies, nextId);
+  saveUserMovies(username, {
+    movies: repaired.movies,
+    nextId: mergeNextId(data.nextId, repaired.nextId, repaired.movies),
+    battleSessions: data.battleSessions || [],
+    battleMatches: data.battleMatches || []
+  });
+  saveUserPrefs(DATA_DIR, username, prefs);
+  invalidateUserRecommendations(username);
+
+  return {
+    importedKeys,
+    stats,
+    partial: failedKeys.length > 0 || importedKeys.length < actions.length
+  };
+}
+
+app.post('/api/user/import-guest-swipes', async (req, res) => {
+  const username = requireAuth(req, res);
+  if (!username) return;
+
+  try {
+    const result = await importGuestSwipeActions(username, req.body?.actions);
+    return res.json({
+      success: true,
+      importedKeys: result.importedKeys,
+      stats: result.stats,
+      partial: result.partial
+    });
+  } catch (error) {
+    if (RECOMMENDER_DEBUG) console.error('[import-guest-swipes] failed', error?.message);
+    return res.status(500).json({ error: 'Не удалось импортировать свайпы' });
+  }
+});
+
 app.get('/api/movie/search', async (req, res) => {
   const username = requireAuth(req, res);
   if (!username) return;
@@ -2320,7 +2442,7 @@ app.get('/api/movie/details/:tmdbId', async (req, res) => {
   // Отдаём только «ядро» (TMDB) — это быстро. Тяжёлые рейтинги/ссылки на Kinogo
   // фронтенд подгружает отдельным запросом (/api/movie/extras), чтобы страница
   // фильма открывалась мгновенно, не дожидаясь веб-скрейпинга.
-  const data = await loadTmdbCore(req.params.tmdbId, mediaType, req.query.lang);
+  const data = await loadTmdbCore(req.params.tmdbId, mediaType, req.query.lang || getRequestLang(req));
   if (!data) return res.status(503).json({ error: 'TMDB API недоступен' });
   // Средняя оценка по сайту среди пользователей (из их списков) — локально, быстро.
   if (data.meta) {
@@ -2352,6 +2474,8 @@ app.get('/api/movie/player/:tmdbId', async (req, res) => {
   optionalAuth(req);
   const mediaType = req.query.type === 'tv' ? 'tv' : 'movie';
   const translator = req.query.translator ? String(req.query.translator) : null;
+  const season = req.query.season ? Number(req.query.season) : null;
+  const episode = req.query.episode ? Number(req.query.episode) : null;
   try {
     const core = await loadTmdbCore(req.params.tmdbId, mediaType);
     if (!core) return res.status(503).json({ error: 'TMDB API недоступен' });
@@ -2360,12 +2484,58 @@ app.get('/api/movie/player/:tmdbId', async (req, res) => {
     const originalTitle = core.meta?.originalTitle || core._raw?.baseTitle || null;
     const year = core._raw?.year || core.meta?.year || null;
 
-    const data = await getPlayer(req.params.tmdbId, mediaType, title, year, originalTitle, translator);
+    const data = await getPlayer(
+      req.params.tmdbId,
+      mediaType,
+      title,
+      year,
+      originalTitle,
+      translator,
+      season,
+      episode
+    );
     if (!data || !data.qualities?.length) return res.json({ error: 'not found' });
     res.json(data);
   } catch (err) {
     if (RECOMMENDER_DEBUG) console.error('[player] failed', err?.message);
     res.json({ error: 'not found' });
+  }
+});
+
+// Прокси видеопотока HDRezka CDN: браузер не всегда следует 302 и не шлёт Referer.
+const STREAM_PROXY_RE = /^https:\/\/([a-z0-9-]+\.)*(voidboost\.cc|collaps\.io)\//i;
+
+app.get('/api/movie/stream', async (req, res) => {
+  optionalAuth(req);
+  const raw = String(req.query.url || '').trim();
+  if (!STREAM_PROXY_RE.test(raw)) {
+    return res.status(400).json({ error: 'invalid url' });
+  }
+  const hdrezkaBase = (process.env.HDREZKA_BASE || 'https://hdrezka.ag').replace(/\/$/, '');
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    Referer: `${hdrezkaBase}/`,
+    Accept: 'video/*,*/*'
+  };
+  if (req.headers.range) headers.Range = req.headers.range;
+
+  try {
+    const upstream = await fetch(raw, { headers, redirect: 'follow' });
+    if (!upstream.ok && upstream.status !== 206) {
+      return res.status(upstream.status).end();
+    }
+    res.status(upstream.status);
+    for (const name of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+      const val = upstream.headers.get(name);
+      if (val) res.setHeader(name, val);
+    }
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store');
+    if (!upstream.body) return res.end();
+    Readable.fromWeb(upstream.body).pipe(res);
+  } catch (err) {
+    if (RECOMMENDER_DEBUG) console.error('[stream] proxy failed', err?.message);
+    res.status(502).end();
   }
 });
 
@@ -2420,6 +2590,14 @@ function catalogDeps(lang) {
   return { tmdbFetch: makeLocalizedTmdbFetch(lang), tmdbPosterFromPath, getSiteRating, getGenreNameMap };
 }
 
+function catalogUserContext(req) {
+  const authedUser = optionalAuth(req);
+  if (!authedUser) return null;
+  const { movies } = loadUserMovies(authedUser);
+  const prefs = loadUserPrefs(DATA_DIR, authedUser);
+  return { movies, prefs };
+}
+
 // Лёгкий список подборок — без обращения к TMDB. ?lang=ru|en — язык подписей.
 app.get('/api/catalog', (req, res) => {
   res.json(getCatalogIndex(req.query.lang));
@@ -2431,13 +2609,40 @@ app.get('/api/catalog/home', (req, res) => {
   res.json(getHomeRails(req.query.lang));
 });
 
+// Поиск по названию в каталоге (доступен гостям). ?q=&filter=all|movie|tv&lang=ru|en
+app.get('/api/catalog/search', async (req, res) => {
+  optionalAuth(req);
+  if (!process.env.TMDB_API_KEY) return res.status(503).json({ error: 'TMDB API недоступен' });
+  const rawQuery = String(req.query.q || '').trim();
+  if (!rawQuery) return res.status(400).json({ error: 'Укажите название' });
+  const filter = req.query.filter === 'movie' ? 'movie' : req.query.filter === 'tv' ? 'tv' : 'all';
+  try {
+    let items = [];
+    if (filter === 'all') {
+      const [movies, tv] = await Promise.all([
+        collectTmdbSearchResults(rawQuery, 'movie'),
+        collectTmdbSearchResults(rawQuery, 'tv')
+      ]);
+      items = [...movies, ...tv];
+    } else {
+      items = await collectTmdbSearchResults(rawQuery, filter);
+    }
+    res.json({ query: rawQuery, filter, items: items.slice(0, 24) });
+  } catch (err) {
+    if (RECOMMENDER_DEBUG) console.error('[catalog] search failed', err?.message);
+    res.status(500).json({ error: 'Не удалось выполнить поиск' });
+  }
+});
+
 // 200 лучших за всё время. ?filter=all|movie|tv&lang=ru|en
 app.get('/api/catalog/top', async (req, res) => {
   optionalAuth(req);
   if (!process.env.TMDB_API_KEY) return res.status(503).json({ error: 'TMDB API недоступен' });
   try {
     const filter = req.query.filter === 'movie' ? 'movie' : req.query.filter === 'tv' ? 'tv' : 'all';
-    const items = await getCatalogTop200(catalogDeps(req.query.lang), filter, req.query.lang);
+    const items = await getCatalogTop200(
+      catalogDeps(req.query.lang), filter, req.query.lang, catalogUserContext(req)
+    );
     res.json({ filter, items });
   } catch (err) {
     if (RECOMMENDER_DEBUG) console.error('[catalog] top200 failed', err?.message);
@@ -2450,7 +2655,9 @@ app.get('/api/catalog/collection/:id', async (req, res) => {
   optionalAuth(req);
   if (!process.env.TMDB_API_KEY) return res.status(503).json({ error: 'TMDB API недоступен' });
   try {
-    const items = await getCatalogCollection(catalogDeps(req.query.lang), req.params.id, req.query.lang);
+    const items = await getCatalogCollection(
+      catalogDeps(req.query.lang), req.params.id, req.query.lang, catalogUserContext(req)
+    );
     if (items === null) return res.status(404).json({ error: 'Подборка не найдена' });
     res.json({ id: req.params.id, items });
   } catch (err) {
@@ -2495,22 +2702,37 @@ const COLLECTION_PRESET_LABEL = {
 };
 
 // Простое определение жанров из свободного запроса («хочу что-то смешное»).
-const COLLECTION_QUERY_GENRES = {
-  'драм': 'драма', 'трилл': 'триллер', 'детектив': 'детектив', 'комед': 'комедия',
-  'смешн': 'комедия', 'весёл': 'комедия', 'весел': 'комедия', 'мелодрам': 'мелодрама',
-  'романт': 'мелодрама', 'любов': 'мелодрама', 'фантаст': 'фантастика', 'фэнтез': 'фэнтези',
-  'боевик': 'боевик', 'экшен': 'боевик', 'криминал': 'криминал', 'ужас': 'ужасы',
-  'хоррор': 'ужасы', 'семейн': 'семейный', 'приключ': 'приключения', 'мультф': 'мультфильм',
-  'анимац': 'мультфильм', 'истор': 'история', 'военн': 'военный', 'музык': 'музыка'
-};
+// detectCollectionGenres импортирован из collectionQueryValidation.js
 
-function detectCollectionGenres(query) {
-  const text = String(query || '').toLowerCase().replace(/ё/g, 'е');
-  const hits = new Set();
-  for (const [kw, name] of Object.entries(COLLECTION_QUERY_GENRES)) {
-    if (kw && text.includes(kw.replace(/ё/g, 'е'))) hits.add(name);
-  }
-  return [...hits];
+function collectionQueryErrorMessage(lang, code) {
+  const key = collectionQueryErrorKey(code);
+  const table = {
+    ru: {
+      'collections.inputRequired': 'Опишите, что хотите посмотреть — хотя бы пару слов.',
+      'collections.queryTooShort': 'Слишком короткий запрос — опишите подробнее.',
+      'collections.queryTooLong': 'Слишком длинный запрос — сократите до пары предложений.',
+      'collections.queryProfanity': 'Напишите, что хотите посмотреть — настроение или жанр, без ругательств.',
+      'collections.queryOffTopic': 'Не понял запрос. Опишите настроение, жанр или ситуацию — например: «устал, хочу лёгкую комедию».',
+      'collections.error': 'Ошибка подборки'
+    },
+    en: {
+      'collections.inputRequired': 'Describe what you want to watch — at least a few words.',
+      'collections.queryTooShort': 'Query is too short — please add more detail.',
+      'collections.queryTooLong': 'Query is too long — keep it to a sentence or two.',
+      'collections.queryProfanity': 'Describe what you want to watch — mood or genre, without profanity.',
+      'collections.queryOffTopic': 'I did not understand the request. Describe a mood, genre, or situation — e.g. “tired, want something light”.',
+      'collections.error': 'Collection error'
+    },
+    kk: {
+      'collections.inputRequired': 'Не көруді қалайтыныңызды сипаттаңыз — кем дегенде бірнеше сөз.',
+      'collections.queryTooShort': 'Сұрау тым қысқа — толығырақ жазыңыз.',
+      'collections.queryTooLong': 'Сұрау тым ұзын — бір-екі сөйлемге қысқартыңыз.',
+      'collections.queryProfanity': 'Не көруді қалайтыныңызды жазыңыз — көңіл-күй немесе жанр, балағатсыз.',
+      'collections.queryOffTopic': 'Сұрау түсініксіз. Көңіл-күй, жанр немесе жағдайды сипаттаңыз — мысалы: «шаршадым, жеңіл комедия қалаймын».',
+      'collections.error': 'Жинақ қатесі'
+    }
+  }[normalizeAppLang(lang)] || {};
+  return table[key] || table['collections.error'] || key;
 }
 
 app.post('/api/collections', async (req, res) => {
@@ -2518,6 +2740,18 @@ app.post('/api/collections', async (req, res) => {
   if (!username) return;
 
   const { query, preset } = req.body || {};
+  const lang = getRequestLang(req);
+
+  const freeQuery = String(query || '').trim();
+  if (freeQuery) {
+    const validation = validateCollectionQuery(freeQuery);
+    if (!validation.ok) {
+      return res.status(400).json({
+        error: collectionQueryErrorMessage(lang, validation.code),
+        code: validation.code
+      });
+    }
+  }
 
   try {
     const { movies } = loadUserMovies(username);
@@ -2767,7 +3001,7 @@ const RECOMMENDATION_CACHE_TTL_MS = Number(process.env.RECOMMENDATION_CACHE_TTL_
 const recommendationCache = new Map();
 
 function recommendationCacheKey(username, mediaTypeFilter, categoryFilter, lang) {
-  const l = normalizeTmdbLanguage(lang) === 'en-US' ? 'en' : 'ru';
+  const l = normalizeAppLang(lang);
   return `${username}::${l}::${mediaTypeFilter || 'all'}::${categoryFilter || 'none'}`;
 }
 
@@ -3247,11 +3481,11 @@ app.get('/api/recommendations', async (req, res) => {
     const blacklistPrompt = buildBlacklistPrompt(prefs.blacklist);
     const psychPrompt = appendPsychSignals(prefs);
     const limit = normalizeRecommendationLimit(req.query.limit);
-    const lang = req.query.lang;
+    const lang = getRequestLang(req);
     const excludeTitles = parseExcludedTitles(req.query.excludeTitles);
     const mediaTypeFilter = req.query.mediaType === 'tv' ? 'tv' : req.query.mediaType === 'movie' ? 'movie' : null;
     const categoryFilter = req.query.category === 'animation' ? 'animation' : null;
-    const enrichOpts = { limit, excludeTitles, mediaType: mediaTypeFilter, category: categoryFilter };
+    const enrichOpts = { limit, excludeTitles, mediaType: mediaTypeFilter, category: categoryFilter, language: lang };
     const aiForced = req.query.ai === '1';
     // Ручное «Обновить» в свайпах присылает nocache=1 — обходим кеш, чтобы
     // вернуть свежую подборку, а не тот же набор карточек.
@@ -3428,7 +3662,7 @@ app.post('/api/discover/feed', async (req, res) => {
     const categoryFilter = req.body?.category === 'animation' ? 'animation' : null;
     const enrichOpts = { limit, excludeTitles, mediaType: mediaTypeFilter, category: categoryFilter };
     const swipeSession = parseSwipeSession(req.body?.session);
-    const lang = req.body?.lang || req.query.lang;
+    const lang = getRequestLang(req);
 
     const engineMediaType = categoryFilter === 'animation' ? 'tv' : mediaTypeFilter;
     // Просим у движка заметно больше кандидатов, чем нужно: анти-зацикливание
@@ -3472,487 +3706,6 @@ app.post('/api/discover/feed', async (req, res) => {
   }
 });
 
-/* ===================================================================
-   ХЕЛПЕРЫ AI-ЧАТА: подборки с карточками
-   -------------------------------------------------------------------
-   Логика экономии OpenAI:
-     • Простые подборки (жанр/тема) собираются из TMDb локальным скорингом
-       (buildSimpleRecommendations) — OpenAI не вызывается вообще.
-     • Сложные запросы идут в OpenAI, но КАЖДОЕ предложенное название
-       проверяется через TMDb (buildComplexRecommendations): факты (постер,
-       год, рейтинг, описание, жанры) берём только из TMDb, выдуманные
-       тайтлы отбрасываем.
-     • Любой ответ-подборка превращается в структуру { type:"recommendations",
-       items:[...] } — фронтенд рисует это карточками.
-   =================================================================== */
-
-function clampNum(v, lo, hi) {
-  return Math.max(lo, Math.min(hi, v));
-}
-
-// Перевод русской темы в англоязычный keyword TMDB (keyword-индекс TMDB
-// англоязычный). Покрывает частые темы; иначе пробуем тему как есть.
-const THEME_KEYWORD_TRANSLATIONS = {
-  'маньяк': 'serial killer', 'серийн': 'serial killer', 'убийц': 'murder',
-  'зомби': 'zombie', 'вампир': 'vampire', 'оборотн': 'werewolf',
-  'космос': 'space', 'инопланет': 'alien', 'пришельц': 'alien',
-  'робот': 'robot', 'киборг': 'cyborg', 'апокалипс': 'post-apocalyptic',
-  'выживани': 'survival', 'войн': 'war', 'шпион': 'spy', 'мафи': 'mafia',
-  'наркот': 'drugs', 'тюрьм': 'prison', 'призрак': 'ghost', 'демон': 'demon',
-  'путешестви': 'time travel', 'супергеро': 'superhero', 'магия': 'magic',
-  'дракон': 'dragon', 'пират': 'pirate', 'ограблени': 'heist',
-  'катастроф': 'disaster', 'монстр': 'monster', 'эпидеми': 'pandemic'
-};
-
-function translateThemeToKeyword(theme) {
-  const t = String(theme || '').toLowerCase().replace(/ё/g, 'е');
-  for (const [stem, en] of Object.entries(THEME_KEYWORD_TRANSLATIONS)) {
-    if (t.includes(stem)) return en;
-  }
-  return theme;
-}
-
-async function resolveTmdbKeywordIds(theme) {
-  const query = translateThemeToKeyword(theme);
-  const data = await tmdbFetch('/search/keyword', { query }, { language: 'en-US' });
-  if (!data?.results?.length) return [];
-  return data.results.slice(0, 2).map((k) => k.id).filter(Boolean);
-}
-
-// Унифицированная карточка фильма/сериала для ответа /api/chat.
-function toChatCard(c, reason) {
-  return {
-    title: c.title,
-    originalTitle: c.originalTitle || null,
-    year: c.year || null,
-    tmdbId: c.tmdbId || null,
-    mediaType: c.mediaType || 'movie',
-    posterUrl: upgradeTmdbPosterUrl(c.poster, 'w780') || null,
-    overview: (c.overview || '').slice(0, 400),
-    rating: c.voteAverage ? Number(Number(c.voteAverage).toFixed(1)) : null,
-    genres: c.genres || [],
-    reason: reason || c.reason || '',
-    source: c.source || 'tmdb'
-  };
-}
-
-function buildSimpleReason(candidate, detection, quality) {
-  const parts = [];
-  if (detection.genreNames?.length) {
-    parts.push(`Подходит под запрос на ${detection.genreNames.join(', ')}`);
-  } else if (detection.theme) {
-    parts.push(`Подходит под тему «${detection.theme}»`);
-  } else {
-    parts.push('Подходит под ваш запрос');
-  }
-  if (candidate.voteAverage >= 7 && candidate.voteCount >= 200) {
-    parts.push(`высокий рейтинг TMDB ${Number(candidate.voteAverage).toFixed(1)}`);
-  } else if (candidate.voteAverage) {
-    parts.push(`рейтинг TMDB ${Number(candidate.voteAverage).toFixed(1)}`);
-  }
-  return `${parts.join(' и ')}.`;
-}
-
-function buildRecommendationsHeader(detection) {
-  const what = detection?.mediaType === 'tv' ? 'сериалов' : 'фильмов';
-  if (detection?.genreNames?.length) {
-    return `Вот подборка (${detection.genreNames.join(', ')}), которая может вам подойти:`;
-  }
-  if (detection?.theme) {
-    return `Вот подборка по теме «${detection.theme}»:`;
-  }
-  return `Вот подборка ${what}, которые могут вам подойти:`;
-}
-
-/**
- * buildSimpleRecommendations — ПРОСТАЯ подборка БЕЗ OpenAI.
- * Алгоритм по ТЗ: распознать жанр/количество/тип → взять кандидатов из TMDb
- * (discover/keyword) → исключить уже добавленное, просмотренное и чёрный
- * список → отсортировать по TMDb-рейтингу, числу голосов, популярности,
- * рейтингу сайта и личным предпочтениям → вернуть карточки.
- */
-async function buildSimpleRecommendations({ movies, prefs, detection }) {
-  const mediaType = detection.mediaType === 'tv' ? 'tv' : 'movie';
-  const limit = Math.max(1, Math.min(20, detection.count || 10));
-  const genreNameMap = await getGenreNameMap(tmdbFetch); // id → русское имя жанра
-  const tasteProfile = buildUserTasteProfile(movies, prefs);
-
-  // Тема («про маньяков») → keyword id у TMDb (всё ещё без OpenAI).
-  let keywordIds = [];
-  if (detection.theme) keywordIds = await resolveTmdbKeywordIds(detection.theme);
-
-  // Исключаем: всё, что уже в списке пользователя, и просмотренное по tmdbId.
-  const blockedTitles = new Set(
-    [...movies.map((m) => m.title), ...movies.map((m) => m.meta?.originalTitle)]
-      .filter(Boolean).map(normalizeWatchTitle)
-  );
-  const blockedTmdb = new Set(
-    movies.filter((m) => m.tmdbId).map((m) => `${m.mediaType || 'movie'}:${m.tmdbId}`)
-  );
-
-  const discoverPath = mediaType === 'tv' ? '/discover/tv' : '/discover/movie';
-  const pool = new Map();
-
-  for (let page = 1; page <= 5 && pool.size < limit * 5; page += 1) {
-    const params = {
-      sort_by: 'popularity.desc',
-      include_adult: 'false',
-      'vote_count.gte': detection.theme ? 30 : 100,
-      page: String(page)
-    };
-    if (detection.genreIds?.length) params.with_genres = detection.genreIds.join(',');
-    if (keywordIds.length) params.with_keywords = keywordIds.join('|');
-    if (detection.originalLanguage) params.with_original_language = detection.originalLanguage;
-
-    const data = await tmdbFetch(discoverPath, params);
-    if (!data?.results?.length) break;
-
-    for (const r of data.results) {
-      const title = r.title || r.name;
-      if (!title || !r.poster_path) continue; // фронтенду нужен постер
-      const tmdbKey = `${mediaType}:${r.id}`;
-      const titleKey = normalizeWatchTitle(title);
-      if (pool.has(tmdbKey)) continue;
-      if (blockedTmdb.has(tmdbKey) || blockedTitles.has(titleKey)) continue; // уже добавлено/просмотрено
-
-      const releaseDate = r.release_date || r.first_air_date || null;
-      const genres = (r.genre_ids || []).map((id) => genreNameMap.get(id)).filter(Boolean);
-      const candidate = {
-        tmdbId: r.id,
-        title,
-        originalTitle: r.original_title || r.original_name || null,
-        mediaType,
-        poster: tmdbPosterFromPath(r.poster_path, 'w780'),
-        year: releaseDate ? Number(releaseDate.slice(0, 4)) || null : null,
-        releaseDate,
-        overview: r.overview || '',
-        genres,
-        voteAverage: r.vote_average || 0,
-        voteCount: r.vote_count || 0,
-        popularity: r.popularity || 0
-      };
-      // Чёрный список (жанры/год/рантайм/страна).
-      if (matchesBlacklist({ title, genres, meta: { year: candidate.year } }, prefs.blacklist)) continue;
-      pool.set(tmdbKey, candidate);
-    }
-  }
-
-  const candidates = [...pool.values()];
-  if (!candidates.length) return [];
-
-  // Скоринг: TMDb рейтинг + число голосов + популярность + рейтинг сайта +
-  // личные предпочтения пользователя (scoreMovieForUser).
-  const scored = candidates.map((c) => {
-    const voteConfidence = clampNum((c.voteCount || 0) / 500, 0, 1);
-    const quality = clampNum((c.voteAverage / 10) * (0.4 + 0.6 * voteConfidence), 0, 1);
-    const popularity = clampNum(Math.log10((c.popularity || 0) + 1) / 3, 0, 1);
-    const site = getSiteRating(c);
-    const siteScore = site ? clampNum((site.average / 10) * clampNum(site.count / 5, 0, 1), 0, 1) : 0;
-    const personalInfo = scoreMovieForUser(
-      { ...c, genres: (c.genres || []).map(canonicalGenre) }, tasteProfile, { mode: 'personal' }
-    );
-    const personal = Number.isFinite(personalInfo.score) ? clampNum(personalInfo.score * 3, -1, 1) : 0;
-    const sortScore = quality * 0.5 + popularity * 0.15 + siteScore * 0.15 + personal * 0.2;
-    return { c, sortScore, quality };
-  });
-
-  scored.sort((a, b) => b.sortScore - a.sortScore);
-  return scored.slice(0, limit).map(({ c, quality }) => toChatCard(c, buildSimpleReason(c, detection, quality)));
-}
-
-function stripJsonFences(text) {
-  return String(text || '').replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-}
-
-/**
- * buildComplexRecommendations — СЛОЖНАЯ подборка через OpenAI + TMDb.
- * OpenAI только предлагает названия/критерии. Каждое название проверяется
- * через TMDb (resolveMovieForAdd); если фильм не найден в TMDb — он не
- * показывается. Все факты (постер, год, рейтинг, описание, жанры) берём
- * исключительно из TMDb, чтобы модель не «выдумывала» фильмы.
- */
-async function buildComplexRecommendations({ apiKey, userText, movies, prefs }) {
-  const summary = buildTasteSummaryForAI(movies, prefs);
-  const blacklistPrompt = buildBlacklistPrompt(prefs.blacklist);
-
-  const message = await callOpenAI(apiKey, [
-    {
-      role: 'system',
-      content: 'Ты кинокритик-рекомендатель. Отвечай только валидным JSON без markdown. Предлагай ТОЛЬКО реально существующие фильмы и сериалы — каждый будет проверен по базе TMDB.'
-    },
-    {
-      role: 'user',
-      content: `Запрос пользователя: "${userText}"
-
-Кратко о вкусе пользователя:
-${summary}${blacklistPrompt}
-
-Подбери до 8 подходящих фильмов или сериалов. Для каждого верни оригинальное (английское) название, русское название (если знаешь), тип ("movie" или "tv"), год и короткую причину на русском (1–2 предложения), чем подходит под запрос.
-Не придумывай несуществующие тайтлы. Формат: {"items":[{"title":"...","originalTitle":"...","mediaType":"movie","year":2010,"reason":"..."}]}`
-    }
-  ], false);
-
-  let parsed;
-  try { parsed = JSON.parse(stripJsonFences(message.content)); } catch { parsed = null; }
-  const proposed = parsed?.items || parsed?.recommendations || [];
-  if (!Array.isArray(proposed) || !proposed.length) return [];
-
-  const blockedTmdb = new Set(
-    movies.filter((m) => m.tmdbId).map((m) => `${m.mediaType || 'movie'}:${m.tmdbId}`)
-  );
-  const blockedTitles = new Set(movies.map((m) => normalizeWatchTitle(m.title)));
-
-  const cards = [];
-  const seen = new Set();
-  for (const it of proposed.slice(0, 12)) {
-    if (cards.length >= 8) break;
-    const mediaType = it.mediaType === 'tv' ? 'tv' : 'movie';
-    const queryTitle = it.originalTitle || it.title;
-    if (!queryTitle) continue;
-
-    // Проверка через TMDb: если нет совпадения — фильм НЕ показываем.
-    const resolved = await resolveMovieForAdd(queryTitle, mediaType, {
-      originalTitle: it.originalTitle || it.title
-    });
-    if (resolved.unresolved || !resolved.tmdbId) continue;
-
-    const tmdbKey = `${resolved.mediaType || mediaType}:${resolved.tmdbId}`;
-    if (seen.has(tmdbKey)) continue;
-    if (blockedTmdb.has(tmdbKey) || blockedTitles.has(normalizeWatchTitle(resolved.title))) continue;
-    seen.add(tmdbKey);
-
-    if (matchesBlacklist({
-      title: resolved.title,
-      genres: resolved.genres || [],
-      meta: resolved.meta
-    }, prefs.blacklist)) continue;
-
-    cards.push(toChatCard({
-      tmdbId: resolved.tmdbId,
-      title: resolved.title,
-      originalTitle: resolved.meta?.originalTitle || null,
-      mediaType: resolved.mediaType || mediaType,
-      poster: resolved.meta?.poster || null,
-      year: resolved.meta?.year ? Number(resolved.meta.year) : null,
-      overview: resolved.meta?.overview || '',
-      genres: resolved.genres || [],
-      voteAverage: resolved.meta?.voteAverage || null,
-      source: 'openai+tmdb'
-    }, it.reason || 'Подобрано под ваш запрос и проверено по TMDB.'));
-  }
-
-  return cards;
-}
-
-/**
- * buildLocalRecommenderCards — подборка по локальному персональному движку
- * (TMDb + вкус пользователя), без OpenAI. Используется и когда нет ключа,
- * и как фолбэк, если запрос к OpenAI упал (квота/ключ/сеть), чтобы запрос
- * «посоветуй …» всё равно вернул карточки, а не список всего.
- */
-async function buildLocalRecommenderCards({ movies, prefs, userText }) {
-  const detection = detectRecommendationRequest(userText) || {};
-  const local = await runLocalRecommender({
-    movies, prefs, mode: 'personal',
-    limit: detection.count || 10,
-    mediaType: detection.mediaType || null
-  });
-  return (local.recommendations || []).map((r) => toChatCard({
-    tmdbId: r.tmdbId, title: r.title, originalTitle: r.originalTitle,
-    mediaType: r.mediaType, poster: r.poster, year: r.year,
-    overview: r.overview, genres: r.genres, voteAverage: r.voteAverage,
-    source: 'local_algorithm'
-  }, r.reason));
-}
-
-/**
- * runOpenAIChat — старый путь с tool-calls (управление списком + текстовые
- * ответы про кино). Используется для вопросов о фильмах, анализа вкуса и
- * прочих запросов про кино, где нужен OpenAI.
- */
-async function runOpenAIChat({ apiKey, messages, movies, prefs, username }) {
-  const taste = buildTasteContext(movies, prefs.blacklist);
-  const psychPrompt = appendPsychSignals(prefs);
-  const films = movies.filter((m) => (m.mediaType || 'movie') === 'movie');
-  const series = movies.filter((m) => m.mediaType === 'tv');
-
-  const systemMessage = {
-    role: 'system',
-    content: `Ты помощник списка фильмов и сериалов пользователя ${username}. Отвечай на русском. Обсуждай только кино, сериалы, мультфильмы, аниме и связанные темы.
-
-Инструменты: add_random_movies, add_movies, add_movie, delete_movie, update_movie, update_movie_notes.
-
-Списки раздельные:
-- Фильмы (mediaType "movie") — вкладка «Фильмы»
-- Сериалы (mediaType "tv") — вкладка «Сериалы»
-- При добавлении/удалении/изменении сериала ВСЕГДА указывай mediaType: "tv"
-- При добавлении фильма — mediaType: "movie" (или не указывай, по умолчанию фильм)
-- Не добавляй сериалы в список фильмов и фильмы в список сериалов
-
-Правила:
-- По умолчанию добавление → status "want", без оценки
-- «смотрю» → watching; «посмотрел» / «в просмотренные» → watched
-- add_random_movies: случайные фильмы (mediaType movie) или сериалы (mediaType tv)
-- Для watched нужна оценка 1–10 или randomRating: true
-- ${TITLE_RULE}
-- Фильтрация («покажи сериалы которые смотрю») → отвечай текстом по списку сериалов
-- Не дублируй записи в том же списке (фильм/сериал)
-- Объясняй сюжет без спойлеров
-
-Вкус и история:
-${taste || 'пока нет'}
-${psychPrompt}
-
-Список фильмов (JSON):
-${JSON.stringify(films, null, 2)}
-
-Список сериалов (JSON):
-${JSON.stringify(series, null, 2)}`
-  };
-
-  const apiMessages = [systemMessage, ...messages];
-  const actions = [];
-  let reply = '';
-
-  for (let step = 0; step < 5; step++) {
-    const message = await callOpenAI(apiKey, apiMessages, true);
-
-    if (message.tool_calls?.length > 0) {
-      apiMessages.push(message);
-      for (const toolCall of message.tool_calls) {
-        const args = JSON.parse(toolCall.function.arguments);
-        actions.push({ type: toolCall.function.name, ...args });
-        apiMessages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: JSON.stringify({ success: true })
-        });
-      }
-      continue;
-    }
-
-    reply = message.content || 'Готово!';
-    break;
-  }
-
-  if (!reply && actions.length > 0) reply = 'Список обновлён!';
-  return finalizeChatResponse(reply, actions, movies);
-}
-
-app.post('/api/chat', async (req, res) => {
-  const apiKey = process.env.OPENAI_API_KEY;
-  const username = requireAuth(req, res);
-  if (!username) return;
-
-  const { messages } = req.body;
-  const { movies } = loadUserMovies(username);
-  const prefs = loadUserPrefs(DATA_DIR, username);
-  const userText = getLastUserMessage(messages || []);
-
-  // ── 1) ФИЛЬТР ТЕМЫ ────────────────────────────────────────────────
-  // Нерелевантные запросы (не про кино) НЕ уходят в OpenAI — экономим.
-  if (!isMovieRelatedPrompt(userText)) {
-    return res.json({ type: 'text', message: OFF_TOPIC_REPLY, reply: OFF_TOPIC_REPLY, mode: 'filtered' });
-  }
-
-  // ── 2) ЛОКАЛЬНЫЕ КОМАНДЫ СПИСКА ──────────────────────────────────
-  // add/delete/update/show/stats обрабатываются без OpenAI (localAssistant).
-  // ВАЖНО: «show»-фильтр локального парсера слишком жадный и иногда ловит
-  // запросы на подборку («посоветуй фильм как Интерстеллар, но мрачнее»),
-  // выдавая «Найдено N: …» вместо рекомендаций. Поэтому локальный результат
-  // без конкретных действий (add/delete/update) НЕ перебивает явный запрос на
-  // подборку — такие отправляем в пайплайн рекомендаций ниже.
-  const localResult = parseLocalChat(userText, movies);
-  const recDetectionEarly = detectRecommendationRequest(userText);
-  const isRealRecommendation = Boolean(recDetectionEarly && (recDetectionEarly.isSimple || recDetectionEarly.isComplex));
-  const localHasActions = Boolean(localResult && (localResult.actions || []).length > 0);
-  if (localResult && (localHasActions || !isRealRecommendation)) {
-    const finalized = await finalizeChatResponse(localResult.reply, localResult.actions || [], movies);
-    return res.json({ type: 'text', ...finalized, mode: 'local' });
-  }
-
-  // ── 3) INTENT DETECTION ──────────────────────────────────────────
-  // Определяем тип запроса, чтобы выбрать самый дешёвый путь ответа.
-  const intent = classifyChatIntent(userText, { hasLocalCommand: false });
-
-  // ── 4) ПРОСТАЯ ПОДБОРКА (TMDb, без OpenAI) ───────────────────────
-  if (intent === 'simple_recommendation') {
-    const detection = detectRecommendationRequest(userText);
-    try {
-      const items = await buildSimpleRecommendations({ movies, prefs, detection });
-      if (items.length) {
-        return res.json({
-          type: 'recommendations',
-          message: buildRecommendationsHeader(detection),
-          items,
-          mode: 'tmdb'
-        });
-      }
-    } catch (err) {
-      if (RECOMMENDER_DEBUG) console.error('[chat] simple rec failed', err?.message);
-    }
-    // Если TMDb ничего не дал — попробуем дальше (OpenAI или локальный движок).
-  }
-
-  // ── 5) БЕЗ КЛЮЧА OPENAI ──────────────────────────────────────────
-  if (!apiKey) {
-    // Для подборок без ключа используем локальный персональный движок (TMDb).
-    if (intent === 'complex_recommendation' || intent === 'simple_recommendation') {
-      try {
-        const items = await buildLocalRecommenderCards({ movies, prefs, userText });
-        if (items.length) {
-          return res.json({ type: 'recommendations', message: 'Подобрал по вашему вкусу:', items, mode: 'local_algorithm' });
-        }
-      } catch { /* падаем в текстовый ответ ниже */ }
-    }
-    const noKeyMsg = 'Для умных рекомендаций и ответов о кино нужен ключ OpenAI. Пока доступны команды списка («Добавь …», «Покажи …») и подборки по жанру («посоветуй 10 боевиков»).';
-    return res.json({ type: 'text', message: noKeyMsg, reply: noKeyMsg, mode: 'no_openai' });
-  }
-
-  // ── 6) СЛОЖНАЯ ПОДБОРКА (OpenAI предлагает → TMDb проверяет) ──────
-  if (intent === 'complex_recommendation' || intent === 'simple_recommendation') {
-    try {
-      const items = await buildComplexRecommendations({ apiKey, userText, movies, prefs });
-      if (items.length) {
-        return res.json({
-          type: 'recommendations',
-          message: 'Вот что подходит под ваш запрос:',
-          items,
-          mode: 'openai+tmdb'
-        });
-      }
-    } catch (error) {
-      // OpenAI недоступен (квота/ключ/сеть). Не вываливаем весь список —
-      // пробуем локальный движок рекомендаций, чтобы вернуть карточки.
-      try {
-        const items = await buildLocalRecommenderCards({ movies, prefs, userText });
-        if (items.length) {
-          return res.json({
-            type: 'recommendations',
-            message: 'OpenAI сейчас недоступен — подобрал по вашему вкусу:',
-            items,
-            mode: 'local_algorithm'
-          });
-        }
-      } catch { /* падаем в текстовый ответ ниже */ }
-      const fb = handleOpenAIFailure(error, movies, userText);
-      const finalized = await finalizeChatResponse(fb.reply, fb.actions || [], movies);
-      return res.json({ type: 'text', ...finalized, mode: 'fallback' });
-    }
-    // Если проверенных карточек нет — отвечаем текстом ниже.
-  }
-
-  // ── 7) ВОПРОСЫ О КИНО / АНАЛИЗ ВКУСА / ПРОЧЕЕ ────────────────────
-  // Текстовый ответ OpenAI (с инструментами управления списком).
-  try {
-    const result = await runOpenAIChat({ apiKey, messages, movies, prefs, username });
-    res.json({ type: 'text', ...result, mode: 'openai' });
-  } catch (error) {
-    const fallback = handleOpenAIFailure(error, movies, userText);
-    const finalized = await finalizeChatResponse(fallback.reply, fallback.actions || [], movies);
-    res.json({ type: 'text', ...finalized, mode: 'fallback' });
-  }
-});
 
 // --- Новые API ---
 
@@ -3987,8 +3740,7 @@ app.put('/api/blacklist', (req, res) => {
   res.json({ success: true });
 });
 
-// Добавление одного названия в чёрный список (кнопка «В чёрный список» на
-// карточке рекомендации в чате). Дедуп по нормализованному названию.
+// Добавление одного названия в чёрный список. Дедуп по нормализованному названию.
 app.post('/api/blacklist/title', (req, res) => {
   const username = requireAuth(req, res);
   if (!username) return;
@@ -4059,19 +3811,22 @@ app.get('/api/profile', (req, res) => {
 });
 
 app.get('/api/psych-test', (req, res) => {
-  // Публично: вопросы доступны гостям. Сохранённый результат — только у вошедших.
+  const userLang = getRequestLang(req);
   const username = optionalAuth(req);
   const prefs = username ? loadUserPrefs(DATA_DIR, username) : null;
   if (prefs) normalizePsychPrefs(prefs);
+  const stored = prefs?.psychTest || null;
+  const psychTest = stored
+    ? {
+      ...stored,
+      profileTitle: localizePsychProfile(stored.profile, userLang)?.title || stored.profileTitle
+    }
+    : null;
   res.json({
     guest: !username,
-    psychTest: prefs?.psychTest || null,
+    psychTest,
     psychTestHistory: prefs?.psychTestHistory || [],
-    questions: PSYCH_QUESTIONS.map((q) => ({
-      id: q.id,
-      text: q.text,
-      options: q.options.map((o) => ({ id: o.id, text: o.text }))
-    }))
+    questions: localizePsychQuestions(userLang)
   });
 });
 
@@ -4087,8 +3842,8 @@ app.post('/api/psych-test', (req, res) => {
       success: true,
       saved: false,
       guest: true,
-      psychTest: { ...result, profileTitle: PSYCH_PROFILES[result.profile]?.title || null },
-      profile: PSYCH_PROFILES[result.profile]
+      psychTest: { ...result, profileTitle: localizePsychProfile(result.profile, getRequestLang(req))?.title || PSYCH_PROFILES[result.profile]?.title || null },
+      profile: localizePsychProfile(result.profile, getRequestLang(req))
     });
   }
 
@@ -4235,19 +3990,22 @@ app.post('/api/psych-test/feedback', (req, res) => {
 });
 
 app.get('/api/visual-test', (req, res) => {
+  const userLang = getRequestLang(req);
   const username = optionalAuth(req);
   const prefs = username ? loadUserPrefs(DATA_DIR, username) : null;
   if (prefs) normalizeVisualPrefs(prefs);
+  const stored = prefs?.visualTest || null;
+  const visualTest = stored
+    ? {
+      ...stored,
+      profileTitle: localizeVisualProfile(stored.profile, userLang)?.title || stored.profileTitle
+    }
+    : null;
   res.json({
     guest: !username,
-    visualTest: prefs?.visualTest || null,
+    visualTest,
     visualTestHistory: prefs?.visualTestHistory || [],
-    questions: VISUAL_QUESTIONS.map((q) => ({
-      id: q.id,
-      imageId: q.imageId,
-      text: q.text,
-      options: q.options.map((o) => ({ id: o.id, text: o.text }))
-    }))
+    questions: localizeVisualQuestions(userLang)
   });
 });
 
@@ -4262,8 +4020,8 @@ app.post('/api/visual-test', (req, res) => {
       success: true,
       saved: false,
       guest: true,
-      visualTest: { ...result, profileTitle: VISUAL_PROFILES[result.profile]?.title || null },
-      profile: VISUAL_PROFILES[result.profile]
+      visualTest: { ...result, profileTitle: localizeVisualProfile(result.profile, getRequestLang(req))?.title || VISUAL_PROFILES[result.profile]?.title || null },
+      profile: localizeVisualProfile(result.profile, getRequestLang(req))
     });
   }
 
@@ -4276,7 +4034,7 @@ app.post('/api/visual-test', (req, res) => {
     success: true,
     saved: true,
     visualTest,
-    profile: VISUAL_PROFILES[result.profile]
+    profile: localizeVisualProfile(result.profile, getRequestLang(req))
   });
 });
 
@@ -4404,14 +4162,12 @@ app.post('/api/visual-test/feedback', (req, res) => {
 });
 
 app.get('/api/short-visual-tests', (req, res) => {
+  const userLang = getRequestLang(req);
   const username = optionalAuth(req);
   const prefs = username ? loadUserPrefs(DATA_DIR, username) : null;
   if (prefs) normalizeShortVisualPrefs(prefs);
 
-  const tests = SHORT_VISUAL_TESTS.map((test) => ({
-    ...test,
-    questions: getTestQuestions(test.id)
-  }));
+  const tests = localizeShortVisualTests(userLang);
 
   res.json({
     guest: !username,
@@ -4779,6 +4535,8 @@ JSON: {"picks":[{"title":"...","runtime":85,"reason":"...","whyDetailed":"...","
 app.get('/api/premieres', async (req, res) => {
   // Публичный эндпоинт: премьеры видны и гостям. Для вошедших —
   // персональная сортировка по вкусу, для гостей — по популярности.
+  const userLang = getRequestLang(req);
+  const localizedTmdb = makeLocalizedTmdbFetch(userLang);
   const username = optionalAuth(req);
   const { movies } = username ? loadUserMovies(username) : { movies: [] };
   const prefs = username ? loadUserPrefs(DATA_DIR, username) : loadUserPrefs(DATA_DIR, '__guest__');
@@ -4806,14 +4564,12 @@ app.get('/api/premieres', async (req, res) => {
   const upcoming = fromList.filter((p) => p.releaseDate > today);
 
   let tmdbUpcoming = [];
-  const movieData = await tmdbFetch('/movie/upcoming', { region: 'RU' });
-  if (movieData?.results) {
-    // Персональная сортировка: самые релевантные вкусу премьеры — выше,
-    // затем берём топ-15 (вместо первых 15 по популярности).
-    let ranked = movieData.results;
+  const rawUpcoming = await fetchTmdbUpcomingForPremieres(userLang);
+  if (rawUpcoming.length) {
+    let ranked = rawUpcoming;
     try {
       const scored = await scoreTmdbResultsForUser({
-        tmdbFetch, tmdbPosterFromPath, results: movieData.results,
+        tmdbFetch: localizedTmdb, tmdbPosterFromPath, results: rawUpcoming,
         mediaType: 'movie', movies, prefs, mode: 'premieres'
       });
       ranked = scored.map((s) => s.result);
@@ -4835,11 +4591,44 @@ app.get('/api/premieres', async (req, res) => {
     }));
   }
 
-  // Доп. поле: средняя оценка по сайту среди пользователей.
   for (const p of upcoming) p.siteRating = getSiteRating(p);
   for (const p of tmdbUpcoming) p.siteRating = getSiteRating(p);
 
   res.json({ upcoming, tmdbUpcoming, reminders: prefs.premiereReminders || [] });
+});
+
+app.post('/api/titles/localize', async (req, res) => {
+  if (!process.env.TMDB_API_KEY) {
+    return res.status(503).json({ error: serverT(getRequestLang(req), 'tmdbUnavailable') });
+  }
+  const lang = getRequestLang(req);
+  const items = (Array.isArray(req.body?.items) ? req.body.items : []).slice(0, 80);
+  const titles = {};
+  const overviews = {};
+  const genres = {};
+  const localized = {};
+
+  await Promise.all(items.map(async (raw) => {
+    const tmdbId = Number(raw?.tmdbId);
+    const mediaType = raw?.mediaType === 'tv' ? 'tv' : 'movie';
+    if (!tmdbId) return;
+    const key = `${mediaType}:${tmdbId}`;
+    try {
+      const core = await loadTmdbBrief(tmdbId, mediaType, lang);
+      if (!core) return;
+      const entry = {
+        title: core.title || null,
+        overview: core.overview || '',
+        genres: core.genres || []
+      };
+      localized[key] = entry;
+      if (entry.title) titles[key] = entry.title;
+      if (entry.overview) overviews[key] = entry.overview;
+      if (entry.genres.length) genres[key] = entry.genres;
+    } catch { /* skip */ }
+  }));
+
+  res.json({ lang, titles, overviews, genres, items: localized });
 });
 
 app.get('/api/premieres/suggest', async (req, res) => {
@@ -5001,21 +4790,54 @@ function buildFilmography(credits) {
 
 async function loadPersonDetails(personId, language = 'ru-RU') {
   const lang = normalizeTmdbLanguage(language);
+  const appLang = normalizeAppLang(language);
   const cacheKey = `${personId}:${lang}`;
   const cached = cacheGet(personCache, cacheKey);
   if (cached) return cached;
 
-  const person = await tmdbFetch(`/person/${personId}`, {
-    append_to_response: 'combined_credits,images,external_ids'
-  }, { language: lang });
-  if (!person) return null;
+  const fetchOpts = { append_to_response: 'combined_credits,images,external_ids' };
+  const endpoint = `/person/${personId}`;
+  let person;
+  let biography = '';
 
-  // Fallback биографии: если на выбранном языке её нет — берём английскую.
-  let biography = person.biography || '';
-  if (!biography && lang !== 'en-US') {
-    const enPerson = await tmdbFetch(`/person/${personId}`, {}, { language: 'en-US' });
-    biography = enPerson?.biography || '';
+  if (appLang === 'kk') {
+    const [kkPerson, ruPerson, enPerson] = await Promise.all([
+      tmdbFetch(endpoint, fetchOpts, { language: 'kk-KZ' }),
+      tmdbFetch(endpoint, fetchOpts, { language: 'ru-RU' }),
+      tmdbFetch(endpoint, fetchOpts, { language: 'en-US' })
+    ]);
+    person = kkPerson || ruPerson || enPerson;
+    if (person && kkPerson) person = { ...kkPerson };
+    biography = await getRuToKk().localizeBiographyKk(
+      kkPerson?.biography,
+      ruPerson?.biography,
+      enPerson?.biography
+    );
+  } else if (appLang === 'ru') {
+    const [ruPerson, enPerson] = await Promise.all([
+      tmdbFetch(endpoint, fetchOpts, { language: 'ru-RU' }),
+      tmdbFetch(endpoint, fetchOpts, { language: 'en-US' })
+    ]);
+    person = ruPerson || enPerson;
+    biography = await getRuToKk().localizeBiographyRu(
+      ruPerson?.biography,
+      enPerson?.biography
+    );
+  } else {
+    person = await tmdbFetch(endpoint, fetchOpts, { language: lang });
+    if (person && !(person.biography || '').trim()) {
+      for (const fbLang of tmdbFallbackChain(language).slice(1)) {
+        const fb = await tmdbFetch(endpoint, {}, { language: fbLang });
+        if ((fb?.biography || '').trim()) {
+          person = { ...person, biography: fb.biography };
+          break;
+        }
+      }
+    }
+    biography = (person?.biography || '').trim();
   }
+
+  if (!person) return null;
 
   const filmography = buildFilmography(person.combined_credits);
   const knownDepartment = person.known_for_department || null;
@@ -5044,7 +4866,7 @@ async function loadPersonDetails(personId, language = 'ru-RU') {
 
 app.get('/api/person/:personId/full', async (req, res) => {
   optionalAuth(req);
-  const data = await loadPersonDetails(req.params.personId, req.query.lang);
+  const data = await loadPersonDetails(req.params.personId, req.query.lang || getRequestLang(req));
   if (!data) return res.status(503).json({ error: 'TMDB API недоступен' });
 
   // HDRezka — необязательное обогащение (рост / место рождения).
@@ -5147,6 +4969,12 @@ function getLanAddresses() {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Сервер запущен: http://localhost:${PORT}`);
+  if (!process.env.TMDB_API_KEY) {
+    console.warn('[config] TMDB_API_KEY не задан — постеры, каталог и умные подборки ограничены');
+  }
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn('[config] OPENAI_API_KEY не задан — AI-чат и импорт работают в локальном режиме');
+  }
   const lan = getLanAddresses();
   if (lan.length) {
     console.log('Для телефона в той же Wi‑Fi:');

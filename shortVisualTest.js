@@ -36,6 +36,13 @@
   let overlayEl = null;
   let zoomEl = null;
 
+  const T = (key, fallback, vars) => (window.t ? window.t(key, vars) : fallback);
+
+  function dateLocale() {
+    const lang = window.I18N?.getLang?.() || 'ru';
+    return lang === 'en' ? 'en-US' : lang === 'kk' ? 'kk-KZ' : 'ru-RU';
+  }
+
   function escapeHtml(text) {
     return String(text)
       .replace(/&/g, '&amp;')
@@ -46,7 +53,7 @@
   function formatDate(iso) {
     if (!iso) return '';
     try {
-      return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+      return new Date(iso).toLocaleDateString(dateLocale(), { day: 'numeric', month: 'long', year: 'numeric' });
     } catch { return ''; }
   }
 
@@ -193,7 +200,7 @@
       block.innerHTML = `
         <article class="short-visual-card">
           <h3 class="short-visual-card-title">${escapeHtml(T('short.title', 'Короткие визуальные тесты'))}</h3>
-          <div class="rec-loading">${window.LoadingUI.ai('Загрузка тестов...', { tag: false, compact: true })}</div>
+          <div class="rec-loading">${window.LoadingUI.ai(T('test.loadingTests', 'Загрузка тестов...'), { tag: false, compact: true })}</div>
         </article>`;
       return;
     }
@@ -209,7 +216,7 @@
         : '';
       const actions = last
         ? `<button type="button" class="btn-primary short-visual-start-btn" data-test-id="${escapeHtml(test.id)}">${escapeHtml(T('test.retake', 'Пройти заново'))}</button>
-           <button type="button" class="short-visual-btn-secondary short-visual-recs-btn" data-result-id="${escapeHtml(last.id)}">${escapeHtml(T('short.recs', 'Рекомендации'))}</button>`
+           <button type="button" class="short-visual-btn-secondary short-visual-recs-btn" data-result-id="${escapeHtml(last.id)}">${escapeHtml(T('test.viewRecs', 'Посмотреть рекомендации'))}</button>`
         : `<button type="button" class="btn-primary short-visual-start-btn" data-test-id="${escapeHtml(test.id)}">${escapeHtml(T('short.start', 'Пройти тест'))}</button>`;
 
       return `
@@ -242,10 +249,10 @@
 
     if (state.step === 'intro') {
       container.innerHTML = `
-        <p class="short-visual-eyebrow">Кино-тест по образам</p>
-        <h2 id="short-visual-step-title" class="short-visual-title">${escapeHtml(test?.title || 'Визуальный тест')}</h2>
-        <p class="short-visual-lead">Это развлекательный подбор по картинкам — не диагностика. На каждом из 4 изображений выберите номер, который ближе по ощущению.</p>
-        <button type="button" class="btn-primary" id="short-visual-begin-btn">Начать</button>
+        <p class="short-visual-eyebrow">${escapeHtml(T('test.eyebrowShort', 'Кино-тест по образам'))}</p>
+        <h2 id="short-visual-step-title" class="short-visual-title">${escapeHtml(test?.title || T('test.visualTitle', 'Визуальный тест'))}</h2>
+        <p class="short-visual-lead">${escapeHtml(T('test.shortLead', 'Это развлекательный подбор по картинкам — не диагностика. На каждом из 4 изображений выберите номер, который ближе по ощущению.'))}</p>
+        <button type="button" class="btn-primary" id="short-visual-begin-btn">${escapeHtml(T('test.start', 'Начать'))}</button>
       `;
       container.querySelector('#short-visual-begin-btn')?.addEventListener('click', () => {
         state.step = 'question';
@@ -257,11 +264,11 @@
 
     if (state.step === 'confirm-exit') {
       container.innerHTML = `
-        <h2 id="short-visual-step-title" class="short-visual-title">Выйти из теста?</h2>
-        <p class="short-visual-lead">Ваши текущие ответы не сохранятся.</p>
+        <h2 id="short-visual-step-title" class="short-visual-title">${escapeHtml(T('test.exitShortTitle', 'Выйти из теста?'))}</h2>
+        <p class="short-visual-lead">${escapeHtml(T('test.exitLost', 'Ваши текущие ответы не сохранятся.'))}</p>
         <div class="short-visual-actions">
-          <button type="button" class="btn-primary" id="short-visual-continue-btn">Продолжить</button>
-          <button type="button" class="short-visual-btn-ghost" id="short-visual-exit-btn">Выйти</button>
+          <button type="button" class="btn-primary" id="short-visual-continue-btn">${escapeHtml(T('test.continueShort', 'Продолжить'))}</button>
+          <button type="button" class="short-visual-btn-ghost" id="short-visual-exit-btn">${escapeHtml(T('battle.exit', 'Выйти'))}</button>
         </div>
       `;
       container.querySelector('#short-visual-continue-btn')?.addEventListener('click', () => {
@@ -281,21 +288,21 @@
 
       container.innerHTML = `
         <div class="short-visual-progress-wrap"><div class="short-visual-progress-bar" style="width:${progress}%"></div></div>
-        <p class="short-visual-progress-label">Вопрос ${state.currentIndex + 1} из ${state.questions.length}</p>
+        <p class="short-visual-progress-label">${escapeHtml(T('test.questionProgress', `Вопрос ${state.currentIndex + 1} из ${state.questions.length}`, { current: state.currentIndex + 1, total: state.questions.length }))}</p>
         <div class="short-visual-image-wrap">
           <img src="${escapeHtml(q.imageSrc)}" alt="${escapeHtml(q.imageAlt)}" loading="lazy" decoding="async">
-          <button type="button" class="short-visual-zoom-btn" id="short-visual-zoom-trigger">Увеличить картинку</button>
+          <button type="button" class="short-visual-zoom-btn" id="short-visual-zoom-trigger">${escapeHtml(T('test.zoomImage', 'Увеличить картинку'))}</button>
         </div>
         <h2 id="short-visual-step-title" class="short-visual-question">${escapeHtml(q.text)}</h2>
-        <div class="short-visual-options" role="radiogroup" aria-label="Выберите номер">
+        <div class="short-visual-options" role="radiogroup" aria-label="${escapeHtml(T('test.selectNumberAria', 'Выберите номер'))}">
           ${options.map((n) => `
             <button type="button" class="short-visual-option${selected === n ? ' short-visual-option--selected' : ''}"
               data-option="${n}" role="radio" aria-checked="${selected === n}">${n}</button>`).join('')}
         </div>
-        <p class="short-visual-error hidden" id="short-visual-answer-error">Выберите номер, чтобы продолжить</p>
+        <p class="short-visual-error hidden" id="short-visual-answer-error">${escapeHtml(T('test.selectNumber', 'Выберите номер, чтобы продолжить'))}</p>
         <div class="short-visual-nav">
-          <button type="button" class="short-visual-btn-ghost" id="short-visual-back-btn"${state.currentIndex === 0 ? ' disabled' : ''}>Назад</button>
-          <button type="button" class="btn-primary" id="short-visual-next-btn">${state.currentIndex === state.questions.length - 1 ? 'Завершить' : 'Далее'}</button>
+          <button type="button" class="short-visual-btn-ghost" id="short-visual-back-btn"${state.currentIndex === 0 ? ' disabled' : ''}>${escapeHtml(T('test.back', 'Назад'))}</button>
+          <button type="button" class="btn-primary" id="short-visual-next-btn">${escapeHtml(state.currentIndex === state.questions.length - 1 ? T('test.finish', 'Завершить') : T('test.next', 'Далее'))}</button>
         </div>
       `;
 
@@ -339,34 +346,34 @@
       const r = state.result;
       if (!r) return;
       const guestNotice = state.guestResult
-        ? `<p class="psych-guest-notice">⚠ Результат не сохранится. <button type="button" class="psych-inline-login" id="short-visual-login-link">Войдите</button>, чтобы хранить историю профиля и получать персональные рекомендации.</p>`
+        ? `<p class="psych-guest-notice">${escapeHtml(T('test.guestNotice', '⚠ Результат не сохранится.'))} <button type="button" class="psych-inline-login" id="short-visual-login-link">${escapeHtml(T('test.loginLink', 'Войдите'))}</button>${escapeHtml(T('test.guestNoticeTail', ', чтобы хранить историю профиля и получать персональные рекомендации.'))}</p>`
         : '';
       const saveBtn = state.guestResult
-        ? `<button type="button" class="short-visual-btn-ghost" id="short-visual-login-save-btn">Войти, чтобы сохранить</button>`
-        : `<button type="button" class="short-visual-btn-ghost" id="short-visual-save-btn">Сохранить результат</button>`;
+        ? `<button type="button" class="short-visual-btn-ghost" id="short-visual-login-save-btn">${escapeHtml(T('test.loginToSave', 'Войти, чтобы сохранить'))}</button>`
+        : `<button type="button" class="short-visual-btn-ghost" id="short-visual-save-btn">${escapeHtml(T('test.saveResult', 'Сохранить результат'))}</button>`;
 
       container.innerHTML = `
-        <p class="short-visual-eyebrow">Ваш результат</p>
+        <p class="short-visual-eyebrow">${escapeHtml(T('test.shortResultEyebrow', 'Ваш результат'))}</p>
         <h2 id="short-visual-step-title" class="short-visual-title">${escapeHtml(r.profileTitle)}</h2>
         <p class="short-visual-lead">${escapeHtml(r.profileDescription || '')}</p>
         ${guestNotice}
         <div class="short-visual-meta-row">
-          <span class="short-visual-meta-chip">Вторичный: ${escapeHtml(r.secondaryProfileTitle || '—')}</span>
-          <span class="short-visual-meta-chip">Темп: ${escapeHtml(r.pace || '—')}</span>
-          <span class="short-visual-meta-chip">Комфорт: ${escapeHtml(r.comfort || '—')}</span>
+          <span class="short-visual-meta-chip">${escapeHtml(T('test.secondary', 'Вторичный'))}: ${escapeHtml(r.secondaryProfileTitle || '—')}</span>
+          <span class="short-visual-meta-chip">${escapeHtml(T('test.pace', 'Темп'))}: ${escapeHtml(r.pace || '—')}</span>
+          <span class="short-visual-meta-chip">${escapeHtml(T('test.comfort', 'Комфорт'))}: ${escapeHtml(r.comfort || '—')}</span>
         </div>
         <div class="short-visual-traits">
-          <h3>Подходящие жанры</h3>
+          <h3>${escapeHtml(T('test.suitableGenres', 'Подходящие жанры'))}</h3>
           <ul>${(r.recommendedGenres || []).map((g) => `<li>${escapeHtml(g)}</li>`).join('')}</ul>
-          <h3>Что лучше избегать</h3>
+          <h3>${escapeHtml(T('test.avoid', 'Что лучше избегать'))}</h3>
           <ul>${(r.avoid || []).map((g) => `<li>${escapeHtml(g)}</li>`).join('')}</ul>
         </div>
         <div class="short-visual-actions short-visual-actions--result">
-          <button type="button" class="btn-primary" id="short-visual-get-recs-btn">Получить рекомендации</button>
+          <button type="button" class="btn-primary" id="short-visual-get-recs-btn">${escapeHtml(T('test.getRecs', 'Получить рекомендации'))}</button>
           ${saveBtn}
-          <button type="button" class="short-visual-btn-ghost" id="short-visual-other-test-btn">Пройти другой тест</button>
-          <button type="button" class="short-visual-btn-ghost" id="short-visual-retake-btn">Пройти заново</button>
-          <button type="button" class="short-visual-btn-ghost" id="short-visual-close-result-btn">Закрыть</button>
+          <button type="button" class="short-visual-btn-ghost" id="short-visual-other-test-btn">${escapeHtml(T('short.otherTest', 'Пройти другой тест'))}</button>
+          <button type="button" class="short-visual-btn-ghost" id="short-visual-retake-btn">${escapeHtml(T('test.retake', 'Пройти заново'))}</button>
+          <button type="button" class="short-visual-btn-ghost" id="short-visual-close-result-btn">${escapeHtml(T('common.close', 'Закрыть'))}</button>
         </div>
       `;
       container.querySelector('#short-visual-get-recs-btn')?.addEventListener('click', () => {
@@ -374,7 +381,7 @@
         state.step = 'recommendations';
         renderStep();
       });
-      container.querySelector('#short-visual-save-btn')?.addEventListener('click', () => toast('Результат уже сохранён', 'success'));
+      container.querySelector('#short-visual-save-btn')?.addEventListener('click', () => toast(T('test.alreadySaved', 'Результат уже сохранён'), 'success'));
       const shortLogin = () => (window.requireLogin ? window.requireLogin() : (window.location.href = '/'));
       container.querySelector('#short-visual-login-link')?.addEventListener('click', shortLogin);
       container.querySelector('#short-visual-login-save-btn')?.addEventListener('click', shortLogin);
@@ -413,7 +420,7 @@
         <h2 id="short-visual-step-title" class="short-visual-title">Результат сохранён</h2>
         <p class="short-visual-lead">История доступна в профиле.</p>
         <div class="short-visual-actions">
-          <button type="button" class="btn-primary" id="short-visual-saved-recs-btn">Получить рекомендации</button>
+          <button type="button" class="btn-primary" id="short-visual-saved-recs-btn">${escapeHtml(T('test.getRecs', 'Получить рекомендации'))}</button>
           <button type="button" class="short-visual-btn-ghost" id="short-visual-saved-close-btn">Закрыть</button>
         </div>
       `;
@@ -436,10 +443,10 @@
       container.innerHTML = `
         <h2 id="short-visual-step-title" class="short-visual-title">Рекомендации</h2>
         <p class="short-visual-lead short-visual-recs-based-on">${escapeHtml(basedOnLabel)}</p>
-        <div id="short-visual-recs-list" class="short-visual-recs-list">${window.LoadingUI.aiRecommendations('Подбираю рекомендации...', 4)}</div>
+        <div id="short-visual-recs-list" class="short-visual-recs-list">${window.LoadingUI.aiRecommendations(T('test.pickingRecs', 'Подбираю рекомендации...'), 4)}</div>
         <div class="short-visual-actions">
           <button type="button" class="short-visual-btn-ghost" id="short-visual-recs-back-btn">Назад к результату</button>
-          <button type="button" class="short-visual-btn-ghost" id="short-visual-recs-refresh-btn">Обновить</button>
+          <button type="button" class="short-visual-btn-ghost" id="short-visual-recs-refresh-btn">${escapeHtml(T('common.refresh', 'Обновить'))}</button>
         </div>
       `;
       container.querySelector('#short-visual-recs-back-btn')?.addEventListener('click', () => {
@@ -458,7 +465,7 @@
 
   async function submitTest() {
     const container = ensureOverlay().querySelector('#short-visual-step-content');
-    if (container) container.innerHTML = '<div class="short-visual-loading">' + window.LoadingUI.ai('Считаем ваш профиль просмотра...', { panel: true, tag: false }) + '</div>';
+    if (container) container.innerHTML = '<div class="short-visual-loading">' + window.LoadingUI.ai(T('test.buildingViewingProfile', 'Считаем ваш профиль просмотра...'), { panel: true, tag: false }) + '</div>';
 
     const answers = state.questions.map((q) => ({
       imageType: q.imageType,
@@ -473,7 +480,7 @@
         body: JSON.stringify({ testId: state.activeTestId, answers })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Не удалось сохранить');
+      if (!res.ok) throw new Error(data.error || T('test.saveFailed', 'Ошибка сохранения'));
 
       state.result = data.result;
       state.lastResults[state.activeTestId] = data.result;
@@ -537,7 +544,7 @@
           ${titleHtml}
           <span class="short-visual-rec-meta">${escapeHtml(String(item.year || ''))} · ${typeLabel}</span>
         </div>
-        ${item.genres?.length ? `<p class="short-visual-rec-genres">${item.genres.map(escapeHtml).join(' · ')}</p>` : ''}
+        ${item.genres?.length ? `<p class="short-visual-rec-genres">${(window.MovieDisplay?.displayGenres(item) || item.genres).map(escapeHtml).join(' · ')}</p>` : ''}
         <p class="short-visual-rec-reason">${escapeHtml(item.reason || '')}</p>
         ${testConnection ? `<p class="short-visual-rec-connection">${escapeHtml(testConnection)}</p>` : ''}
         ${item.mood ? `<p class="short-visual-rec-mood">Настроение: ${escapeHtml(item.mood)} · ${escapeHtml(item.pace || '')}</p>` : ''}
@@ -558,7 +565,7 @@
         type: 'add_movie', title: item.title, status: 'want', mediaType, tmdbId: item.tmdbId || undefined
       }]);
       if (results?.[0]?.success) { this.textContent = '✓'; this.disabled = true; }
-      else toast(results?.[0]?.error || 'Не удалось добавить', 'error');
+      else toast(results?.[0]?.error || T('test.addFailed', 'Не удалось добавить'), 'error');
     });
 
     const menuBtn = card.querySelector('.short-visual-dislike-btn');
@@ -584,9 +591,9 @@
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
             card.classList.add('short-visual-rec-card--dismissed');
-            toast('Учтём в следующих рекомендациях', 'success');
+            toast(T('test.feedbackSaved', 'Учтём в следующих рекомендациях'), 'success');
           } catch (err) {
-            toast(err.message || 'Не удалось сохранить', 'error');
+            toast(err.message || T('test.saveFailed', 'Ошибка сохранения'), 'error');
           }
         });
       });
@@ -598,7 +605,7 @@
   async function loadRecommendations() {
     const listEl = document.getElementById('short-visual-recs-list');
     if (!listEl) return;
-    listEl.innerHTML = window.LoadingUI.aiRecommendations('Подбираю рекомендации...', 4);
+    listEl.innerHTML = window.LoadingUI.aiRecommendations(T('test.pickingRecs', 'Подбираю рекомендации...'), 4);
     state.basedOn = null;
 
     try {
@@ -618,7 +625,7 @@
       const data = await res.json();
 
       if (!res.ok) {
-        listEl.innerHTML = `<p class="short-visual-recs-error">${escapeHtml(data.error || 'Не удалось загрузить рекомендации')}</p>`;
+        listEl.innerHTML = `<p class="short-visual-recs-error">${escapeHtml(data.error || T('test.recsLoadError', 'Не удалось загрузить рекомендации'))}</p>`;
         return;
       }
 
@@ -632,7 +639,7 @@
 
       const recs = data.recommendations || [];
       if (!recs.length) {
-        listEl.innerHTML = '<p class="short-visual-recs-error">Пока нет подходящих рекомендаций.</p>';
+        listEl.innerHTML = `<p class="short-visual-recs-error">${escapeHtml(T('test.recsEmpty', 'Пока нет подходящих рекомендаций.'))}</p>`;
         return;
       }
 
@@ -646,7 +653,7 @@
   async function refresh() {
     const block = document.getElementById('short-visual-tests-section');
     if (block) {
-      block.innerHTML = '<article class="short-visual-card"><div class="rec-loading">' + window.LoadingUI.ai('Загрузка тестов...', { tag: false, compact: true }) + '</div></article>';
+      block.innerHTML = '<article class="short-visual-card"><div class="rec-loading">' + window.LoadingUI.ai(T('test.loadingTests', 'Загрузка тестов...'), { tag: false, compact: true }) + '</div></article>';
     }
     try {
       const res = await fetch('/api/short-visual-tests', { headers: window.authHeaders() });

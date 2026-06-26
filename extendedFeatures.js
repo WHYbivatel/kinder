@@ -116,17 +116,17 @@
           <td>${esc(statusLabel(m.status))}</td>
           <td>${m.rating ?? '—'}</td>
           <td>${esc(m.meta?.year || '—')}</td>
-          <td>${esc((m.genres || []).join(', '))}</td>
+          <td>${esc((window.MovieDisplay?.displayGenres(m) || m.genres || []).join(', '))}</td>
         </tr>`).join('');
       const win = window.open('', '_blank');
       if (!win) {
         window.alert('Разрешите всплывающие окна для PDF-экспорта');
         return;
       }
-      win.document.write(`<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Мой список</title>
+      win.document.write(`<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Kinder</title>
         <style>body{font-family:Arial,sans-serif;padding:2rem}table{width:100%;border-collapse:collapse}
         th,td{border:1px solid #333;padding:8px}th{background:#e50914;color:#fff}</style></head>
-        <body><h1>Мой список</h1><table><thead><tr>
+        <body><h1>Kinder</h1><table><thead><tr>
         <th>Название</th><th>Тип</th><th>Статус</th><th>Оценка</th><th>Год</th><th>Жанры</th>
         </tr></thead><tbody>${rows}</tbody></table>
         <p><small>${date} — Ctrl+P для сохранения в PDF</small></p></body></html>`);
@@ -375,7 +375,12 @@
 
   // Минимальная плитка премьеры: постер, название, жанр+год, рейтинг.
   // Вся остальная инфа — на странице фильма (открывается по тапу).
+  function premiereDisplayTitle(item) {
+    return window.MovieDisplay?.displayTitle(item) || item.title || '';
+  }
+
   function renderPremiereRibbonCard(item) {
+    const displayTitle = premiereDisplayTitle(item);
     const href = item.tmdbId ? `/movie.html?type=${item.mediaType === 'tv' ? 'tv' : 'movie'}&id=${item.tmdbId}` : null;
     const card = document.createElement(href ? 'a' : 'article');
     card.className = 'premiere-ribbon-card premiere-ribbon-card--mini';
@@ -387,7 +392,7 @@
     const img = document.createElement('img');
     img.className = 'premiere-ribbon-poster-img';
     img.src = premierePosterUrl(item);
-    img.alt = item.title;
+    img.alt = displayTitle;
     img.loading = 'lazy';
     img.decoding = 'async';
     img.addEventListener('error', () => {
@@ -396,26 +401,29 @@
     });
     posterWrap.appendChild(img);
 
-    const rating = item.voteAverage ? Number(item.voteAverage).toFixed(1) : null;
-    if (rating) {
-      const r = document.createElement('span');
-      r.className = 'premiere-ribbon-rating';
-      r.textContent = `★ ${rating}`;
-      posterWrap.appendChild(r);
-    }
+    const badges = document.createElement('div');
+    badges.className = 'premiere-ribbon-poster-badges';
+
+    const vote = Number(item.voteAverage);
+    const ratingText = Number.isFinite(vote) && vote > 0 ? vote.toFixed(1) : '—';
+    const r = document.createElement('span');
+    r.className = 'premiere-ribbon-rating';
+    r.textContent = `★ ${ratingText}`;
+    badges.appendChild(r);
     if (item.siteRating?.average) {
       const sr = document.createElement('span');
       sr.className = 'premiere-ribbon-rating premiere-ribbon-rating--site';
       sr.title = `Оценка пользователей сайта (${item.siteRating.count})`;
       sr.textContent = `★ ${item.siteRating.average}`;
-      posterWrap.appendChild(sr);
+      badges.appendChild(sr);
     }
     if (item.mediaType === 'tv') {
       const tv = document.createElement('span');
       tv.className = 'premiere-ribbon-typebadge';
       tv.textContent = 'Сериал';
-      posterWrap.appendChild(tv);
+      badges.appendChild(tv);
     }
+    if (badges.childElementCount) posterWrap.appendChild(badges);
     card.appendChild(posterWrap);
 
     const body = document.createElement('div');
@@ -423,14 +431,14 @@
 
     const title = document.createElement('h3');
     title.className = 'premiere-ribbon-card-title';
-    title.textContent = item.title;
+    title.textContent = displayTitle;
     body.appendChild(title);
 
     const meta = document.createElement('p');
     meta.className = 'premiere-ribbon-meta';
     const year = item.year || (item.releaseDate ? item.releaseDate.slice(0, 4) : '');
     const metaParts = [];
-    if (item.genres?.length) metaParts.push(item.genres.slice(0, 1).join(', '));
+    if (item.genres?.length) metaParts.push((window.MovieDisplay?.displayGenres(item) || item.genres).slice(0, 1).join(', '));
     if (year) metaParts.push(String(year));
     meta.textContent = metaParts.join(' · ') || formatPremiereDate(item);
     body.appendChild(meta);
@@ -465,6 +473,7 @@
 
   function renderCompactPremiereItem(item, options = {}) {
     const { showAdd = false } = options;
+    const displayTitle = premiereDisplayTitle(item);
     const li = document.createElement('li');
     li.className = 'premiere-compact-item';
 
@@ -474,7 +483,7 @@
       const img = document.createElement('img');
       img.className = 'premiere-compact-poster-img';
       img.src = premierePosterUrl(item);
-      img.alt = item.title;
+      img.alt = displayTitle;
       img.loading = 'lazy';
       poster.appendChild(img);
     } else {
@@ -489,7 +498,7 @@
     const titleRow = document.createElement('div');
     titleRow.className = 'premiere-compact-title-row';
     const titleEl = document.createElement('strong');
-    titleEl.textContent = item.title;
+    titleEl.textContent = displayTitle;
     titleRow.appendChild(titleEl);
     if (item.year) {
       const yearEl = document.createElement('span');
@@ -501,7 +510,7 @@
 
     const originalHtml = window.MovieDisplay?.formatOriginalTitleHtml(
       item.originalTitle,
-      item.title,
+      displayTitle,
       'premiere-compact-original'
     );
     if (originalHtml) info.insertAdjacentHTML('beforeend', originalHtml);
@@ -573,8 +582,6 @@
     const track = document.getElementById('premiere-ribbon-track');
     if (!track) return;
 
-    track.innerHTML = window.LoadingUI.ai('Загрузка премьер...', { tag: 'p', wrapClass: 'premiere-ribbon-empty rec-loading' });
-
     const movies = getMovies();
     const today = new Date().toISOString().slice(0, 10);
 
@@ -582,6 +589,7 @@
       .filter((m) => window.MovieDisplay?.isFutureReleaseDate(m.meta?.releaseDate, today))
       .map((m) => ({
         id: m.id,
+        tmdbId: m.tmdbId || null,
         title: m.title,
         releaseDate: parsePremiereDateIso(m.meta?.releaseDate),
         year: m.meta?.year,
@@ -594,6 +602,16 @@
         genres: m.genres || [],
         voteAverage: m.meta?.kpRating || m.meta?.imdbRating || null
       }));
+
+    // Сразу показываем премьеры из списка пользователя — не ждём TMDB.
+    premiereMainItems = fromListScheduled
+      .filter((item) => isUpcomingPremiereItem(item, today))
+      .map(normalizePremiereItem);
+    if (premiereMainItems.length) {
+      renderMainPremieres();
+    } else {
+      track.innerHTML = window.LoadingUI.ai('Загрузка премьер...', { tag: 'p', wrapClass: 'premiere-ribbon-empty rec-loading' });
+    }
 
     let items = [...fromListScheduled];
     try {
@@ -640,6 +658,7 @@
       .filter((item) => isUpcomingPremiereItem(item, today))
       .map(normalizePremiereItem);
     renderMainPremieres();
+    // Названия уже локализованы на сервере (X-App-Lang); повторный localize не нужен.
   }
 
   function getWatchNowPrefs(form) {
@@ -792,12 +811,6 @@
     initialized = true;
 
     app.addEventListener('click', async (e) => {
-      if (e.target.closest('#watch-now-btn')) {
-        e.preventDefault();
-        showWatchNowModal();
-        return;
-      }
-
       const exportBtn = e.target.closest('.export-btn');
       if (exportBtn) {
         const format = exportBtn.dataset.format;

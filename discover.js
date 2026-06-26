@@ -40,6 +40,18 @@
   const SEEN_LIMIT = 400;
   let seenEntries = loadSeenEntries();
 
+  function tt(key, fallback, vars) {
+    return (window.t ? window.t(key, vars) : null) || fallback;
+  }
+
+  function refreshBtnLabel(isLoading) {
+    return isLoading ? tt('common.loadingDots', 'Загрузка...') : tt('common.refresh', 'Обновить');
+  }
+
+  function updateRefreshBtn() {
+    if (refreshBtn) refreshBtn.textContent = refreshBtnLabel(loading);
+  }
+
   function loadSeenEntries() {
     try {
       const raw = localStorage.getItem(SEEN_STORAGE_KEY);
@@ -186,7 +198,7 @@
     loading = next;
     if (refreshBtn) {
       refreshBtn.disabled = next;
-      refreshBtn.textContent = next ? 'Загрузка...' : 'Обновить';
+      updateRefreshBtn();
     }
     [likeBtn, skipBtn, watchedBtn].forEach((btn) => { if (btn) btn.disabled = next || !items[index]; });
   }
@@ -198,8 +210,8 @@
   function mediaLabel(item) {
     const mt = item.mediaType || 'movie';
     const tt = (k, f) => (window.t ? window.t(k) : f);
-    const isAnim = mt === 'tv' && /анимац|мульт|animation|cartoon/i.test(`${item.title} ${(item.genres || []).join(' ')}`);
-    if (isAnim) return tt('media.animation', 'Мультфильм');
+    if (window.MediaCategories?.isAnimeContent?.(item)) return tt('media.anime', 'Аниме');
+    if (window.MediaCategories?.isAnimatedContent?.(item)) return tt('media.animation', 'Мультфильм');
     return mt === 'tv' ? tt('media.series', 'Сериал') : tt('media.movie', 'Фильм');
   }
 
@@ -229,24 +241,24 @@
       || item.first_air_date?.slice(0, 4)
       || item.meta?.year
       || '';
-    const genre = (item.genres || [])[0] || '';
+    const genre = (window.MovieDisplay?.displayGenres(item) || item.genres || [])[0] || '';
     const metaParts = [year, genre, mediaLabel(item)].filter(Boolean);
     const rating = ratingValue(item);
     const site = item.siteRating?.average
-      ? `<span class="discover-rating discover-rating--site" title="Оценка пользователей сайта (${item.siteRating.count})">★ ${esc(String(item.siteRating.average))} <small>сайт</small></span>`
+      ? `<span class="discover-rating discover-rating--site" title="${esc(tt('discover.siteRating', 'Оценка пользователей сайта ({count})', { count: item.siteRating.count }))}">★ ${esc(String(item.siteRating.average))} <small>${esc(tt('discover.siteLabel', 'сайт'))}</small></span>`
       : '';
 
     card.innerHTML = `
-      <div class="discover-badge discover-badge--like">Хочу</div>
-      <div class="discover-badge discover-badge--skip">Мимо</div>
+      <div class="discover-badge discover-badge--like">${esc(tt('discover.badge.like', 'Хочу'))}</div>
+      <div class="discover-badge discover-badge--skip">${esc(tt('discover.badge.skip', 'Мимо'))}</div>
       <div class="discover-poster ${poster ? '' : 'discover-poster--empty'}">
         ${poster ? `<div class="discover-poster-bg" style="background-image:url('${esc(poster)}')"></div>` : ''}
-        ${poster ? `<img src="${esc(poster)}" alt="${esc(item.title)}" loading="lazy" decoding="async" draggable="false">` : '<span>🎬</span>'}
+        ${poster ? `<img src="${esc(poster)}" alt="${esc(window.MovieDisplay?.displayTitle(item) || item.title)}" loading="lazy" decoding="async" draggable="false">` : '<span>🎬</span>'}
         ${rating ? `<span class="discover-rating">★ ${esc(rating)}</span>` : ''}
         ${site}
       </div>
       <div class="discover-card-info">
-        <h3 class="discover-card-title">${esc(item.title)}</h3>
+        <h3 class="discover-card-title">${esc(window.MovieDisplay?.displayTitle(item) || item.title)}</h3>
         <p class="discover-card-meta">${esc(metaParts.join(' · ')) || mediaLabel(item)}</p>
       </div>
     `;
@@ -321,7 +333,7 @@
     }
   }
 
-  function animateChoice(choice) {
+  function animateChoice(choice, extra = null) {
     const card = stack.querySelector('.discover-card--top');
     if (!card || loading) return;
     setLoading(true);
@@ -332,9 +344,18 @@
     }
     window.setTimeout(() => {
       if (choice === 'like') applyChoice('like');
-      else if (choice === 'watched') applyChoice('watched');
+      else if (choice === 'watched') applyChoice('watched', extra);
       else applyChoice('skip');
     }, 230);
+  }
+
+  function openWatchedRatingModal() {
+    const item = items[index];
+    if (!item || loading) return;
+    const displayTitle = window.MovieDisplay?.displayTitle(item) || item.title;
+    window.promptWatchedRating?.({ title: displayTitle }).then((rating) => {
+      if (rating) animateChoice('watched', rating);
+    });
   }
 
   // Глобальный счётчик реакций (все пользователи, в т.ч. гости).
@@ -349,13 +370,23 @@
     }).catch(() => undefined);
   }
 
-  async function applyChoice(action) {
+  async function applyChoice(action, rating = null) {
     const item = items[index];
     if (!item) { setLoading(false); return; }
+
+    if (action === 'watched' && (!Number.isFinite(rating) || rating < 1 || rating > 10)) {
+      setLoading(false);
+      return;
+    }
 
     // 0) Запоминаем карточку как «просмотренную» — больше не покажем её
     //    при следующих обновлениях ленты.
     markSeen(item);
+
+    // 0.5) Гостевые свайпы — отдельное хранилище для переноса в аккаунт.
+    if (!window.MovieApp?.isAuthenticated?.()) {
+      window.GuestSwipeActions?.saveGuestSwipeAction?.(item, action, { rating: action === 'watched' ? rating : null });
+    }
 
     // 1) Считаем реакцию глобально (лайк/дизлайк/смотрел).
     recordGlobal(item, action);
@@ -371,11 +402,40 @@
     }
 
     // 2) skip — просто дальше.
-    if (action === 'skip') { nextCard('Мимо'); return; }
+    if (action === 'skip') { nextCard(tt('discover.status.skip', 'Мимо')); return; }
+
+    const displayTitle = window.MovieDisplay?.displayTitle(item) || item.title;
 
     // 3) like/watched — добавляем в список. Гость тоже может добавлять:
     //    список сохраняется локально и переносится в аккаунт после входа.
-    if (isAlreadySaved(item)) { nextCard('Уже есть в списке', 'success'); return; }
+    if (isAlreadySaved(item)) {
+      if (action === 'watched') {
+        try {
+          const result = await window.MovieApp.executeActions([{
+            type: 'update_movie',
+            title: item.title,
+            mediaType: item.mediaType || 'movie',
+            status: 'watched',
+            rating
+          }]);
+          if (result?.[0]?.success) {
+            nextCard(
+              tt('discover.status.addedWatchedRated', 'В «Посмотрел»: {title} — {rating}/10', { title: displayTitle, rating }),
+              'success'
+            );
+            return;
+          }
+          nextCard(result?.[0]?.error || tt('discover.status.addFailed', 'Не удалось добавить'), 'error');
+        } catch (error) {
+          nextCard(error.message || tt('discover.status.saveFailed', 'Не удалось сохранить'), 'error');
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
+      nextCard(tt('notify.alreadyInList', 'Фильм уже есть в списке'), 'success');
+      return;
+    }
 
     const status = action === 'watched' ? 'watched' : 'want';
     try {
@@ -383,18 +443,24 @@
         type: 'add_movie',
         title: item.title,
         status,
+        rating: action === 'watched' ? rating : null,
         mediaType: item.mediaType || 'movie',
         tmdbId: item.tmdbId,
         genres: item.genres || [],
-        meta: { poster: item.poster, year: item.year, overview: item.overview, originalTitle: item.originalTitle }
+        meta: { poster: item.poster, year: item.year, overview: item.overview, originalTitle: item.originalTitle, matchSource: 'discover' }
       }]);
       if (result?.[0]?.success) {
-        nextCard(`${status === 'watched' ? 'В «Посмотрел»' : 'В «Хочу»'}: ${item.title}`, 'success');
+        const msg = status === 'watched'
+          ? tt('discover.status.addedWatchedRated', 'В «Посмотрел»: {title} — {rating}/10', { title: displayTitle, rating })
+          : tt('discover.status.addedWant', 'В «Хочу»: {title}', { title: displayTitle });
+        nextCard(msg, 'success');
         return;
       }
-      nextCard(result?.[0]?.error || 'Не удалось добавить', 'error');
+      nextCard(result?.[0]?.error || tt('discover.status.addFailed', 'Не удалось добавить'), 'error');
     } catch (error) {
-      nextCard(error.message || 'Не удалось сохранить', 'error');
+      nextCard(error.message || tt('discover.status.saveFailed', 'Не удалось сохранить'), 'error');
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -409,7 +475,7 @@
 
   // Язык для запросов (TMDB-названия/описания карточек приходят на нём).
   function lang() {
-    return (window.I18N && window.I18N.tmdbLang) ? window.I18N.tmdbLang() : 'ru';
+    return (window.I18N && window.I18N.getLang) ? window.I18N.getLang() : 'ru';
   }
 
   // Запрос ленты: основной путь — POST /api/discover/feed с сессионным
@@ -524,7 +590,7 @@
       if (manual) items.forEach(markSeen);
       items = [];
       index = 0;
-      stack.innerHTML = window.LoadingUI?.aiRecommendations('Загружаю свайп-ленту...', 1, { tag: 'div' }) || '<div class="rec-empty">Загрузка...</div>';
+      stack.innerHTML = window.LoadingUI?.aiRecommendations(tt('discover.loadingFeed', 'Загружаю свайп-ленту...'), 1, { tag: 'div' }) || `<div class="rec-empty">${esc(tt('common.loading', 'Загрузка...'))}</div>`;
       setStatus('');
     }
 
@@ -545,7 +611,7 @@
       const knownKeys = new Set(items.map(recommendationKey));
       const fallback = localTopUp(BATCH_SIZE, knownKeys);
       items = append ? [...items, ...fallback] : fallback;
-      setStatus(fallback.length ? 'Показываю локальные рекомендации, сервер недоступен.' : (error.message || 'Ошибка загрузки'), fallback.length ? '' : 'error');
+      setStatus(fallback.length ? tt('discover.localFallback', 'Показываю локальные рекомендации, сервер недоступен.') : (error.message || tt('errors.loading', 'Ошибка загрузки')), fallback.length ? '' : 'error');
     } finally {
       renderStack();
     }
@@ -554,13 +620,16 @@
   refreshBtn?.addEventListener('click', () => loadFeed(false));
   likeBtn?.addEventListener('click', () => animateChoice('like'));
   skipBtn?.addEventListener('click', () => animateChoice('skip'));
-  watchedBtn?.addEventListener('click', () => animateChoice('watched'));
+  watchedBtn?.addEventListener('click', () => openWatchedRatingModal());
 
   // Смена языка: названия/описания карточек (TMDB) зависят от языка —
   // перезагружаем ленту, чтобы получить локализованные тайтлы.
   document.addEventListener('i18n:change', () => {
+    updateRefreshBtn();
     if (items && items.length) loadFeed(false);
   });
+
+  updateRefreshBtn();
 
   window.DiscoverPWA = {
     refresh: () => loadFeed(false)

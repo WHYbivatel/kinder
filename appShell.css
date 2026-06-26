@@ -22,11 +22,6 @@ body.app-mode .mobile-app-nav {
   display: none !important;
 }
 
-/* Плавающую кнопку «AI-помощник» прячем — теперь это вкладка */
-body.app-mode .chat-toggle-btn--fixed {
-  display: none !important;
-}
-
 /* Стрелки ленты премьер в app-режиме (телефон/PWA) не нужны — листаем свайпом */
 body.app-mode .premiere-ribbon-nav {
   display: none !important;
@@ -177,32 +172,6 @@ body.app-mode .home-grid {
 
 body.app-mode .home-grid > .content-section {
   margin-top: var(--section-gap);
-}
-
-/* ── Экран AI (чат на всю область) ───────────────────────────────── */
-body.app-mode[data-app-screen="ai"] #chat-panel {
-  display: flex !important;
-  left: 0;
-  right: 0;
-  width: 100%;
-  top: var(--header-height, 56px);
-  bottom: 0;
-  transform: none !important;
-  border-left: 0;
-  z-index: calc(var(--z-header) + 10);
-  padding-bottom: calc(
-    var(--app-tabbar-h) + var(--app-tabbar-gap) + env(safe-area-inset-bottom)
-  );
-}
-
-/* На остальных экранах чат скрыт (даже если кто-то снял .hidden) */
-body.app-mode:not([data-app-screen="ai"]) #chat-panel {
-  display: none !important;
-}
-
-/* Кнопку закрытия чата в app-режиме прячем — выход через вкладки */
-body.app-mode #chat-close {
-  display: none !important;
 }
 
 /* ===================================================================

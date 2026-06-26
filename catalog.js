@@ -1,28 +1,20 @@
 /* ===================================================================
-   catalog.js — каталог фильмов как отдельный слой поверх TMDB.
+   catalog.js — каталог готовых подборок поверх TMDB.
 
-   Идея: каталог — это набор готовых подборок (по жанрам, «лучшее за всё
-   время», новинки, сериалы, популярное, кассовое и т.д.). Подборки
-   основаны не на голой популярности, а на КАЧЕСТВЕ: используется
-   взвешенный (Байесовский) рейтинг, который учитывает и оценку, и
-   надёжность (число голосов). Дополнительно подмешивается средняя
-   оценка фильма по нашему сайту, если она есть.
-
-   Модуль чистый: доступ к TMDB и к оценкам сайта передаётся через deps
-   (tmdbFetch, tmdbPosterFromPath, getSiteRating, getGenreNameMap).
-   Не зависит от server.js (нет циклических зависимостей). Результаты
-   кешируются в памяти, чтобы не дёргать TMDB на каждый запрос.
+   Конфиг подборок — readyCollections.js (единый источник для главной
+   и каталога). Наполнение динамическое: discover/trending + скоринг.
    =================================================================== */
 
-/* ── Взвешенный рейтинг (формула в духе IMDb Top-250) ───────────────
-   WR = (v / (v + m)) * R + (m / (v + m)) * C
-     R — средняя оценка фильма (TMDB vote_average)
-     v — число голосов (vote_count)
-     m — «порог доверия»: сколько голосов нужно, чтобы оценка считалась
-         надёжной (чем выше — тем сильнее малопопулярные фильмы тянутся
-         к среднему C и не вылетают наверх из-за 9.0 при 10 голосах)
-     C — средняя оценка по всему пулу (около 6.8 у TMDB)
-   Гарантия из ТЗ: 9.0 при 10 голосах не обгонит 8.5 при тысячах. */
+import {
+  getReadyCollection,
+  getHomeCollections,
+  getCatalogCollectionGroups
+} from './readyCollections.js';
+import { normalizeAppLang } from './serverLocales.js';
+import { buildUserTasteProfile, scoreMovieForUser, canonicalGenre } from './recommendationEngine.js';
+import { matchesBlacklist } from './prefs.js';
+import { normalizeWatchTitle } from './watchNow.js';
+
 export function weightedRating(voteAverage, voteCount, { minVotes = 300, meanVote = 6.8 } = {}) {
   const v = Number(voteCount) || 0;
   const R = Number(voteAverage) || 0;
@@ -32,10 +24,6 @@ export function weightedRating(voteAverage, voteCount, { minVotes = 300, meanVot
   return (v / (v + m)) * R + (m / (v + m)) * C;
 }
 
-/* blendedScore — взвешенный рейтинг TMDB + (опционально) средняя оценка
-   по сайту. Оценка сайта подмешивается тем сильнее, чем больше у неё
-   собственных голосов, но её максимальное влияние ограничено (~35%),
-   чтобы пара случайных оценок не переворачивала каталог. */
 export function blendedScore(item, siteRating, opts) {
   const wr = weightedRating(item.voteAverage, item.voteCount, opts);
   if (siteRating && Number(siteRating.count) >= 2 && Number(siteRating.average) > 0) {
@@ -46,10 +34,9 @@ export function blendedScore(item, siteRating, opts) {
   return wr;
 }
 
-/* ── Кеш ───────────────────────────────────────────────────────────
-   Каждая подборка кешируется по своему id. Жанровая карта — отдельно. */
 const CACHE_TTL_MS = (Number(process.env.CATALOG_CACHE_TTL_HOURS) || 12) * 60 * 60 * 1000;
-const cache = new Map(); // id → { at, data }
+const cache = new Map();
+const inflight = new Map();
 
 function getCached(id) {
   const hit = cache.get(id);
@@ -60,116 +47,21 @@ function setCached(id, data) {
   cache.set(id, { at: Date.now(), data });
   return data;
 }
+function coalesce(key, build) {
+  if (inflight.has(key)) return inflight.get(key);
+  const promise = (async () => build())().finally(() => { inflight.delete(key); });
+  inflight.set(key, promise);
+  return promise;
+}
+function normLang(lang) {
+  return normalizeAppLang(lang);
+}
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-/* ── Основные жанры каталога ───────────────────────────────────────
-   key — каноническое русское имя жанра (как в TMDB ru и в данных),
-   title — заголовок подборки, emo — эмодзи для пустой карточки. */
-export const CATALOG_GENRES = [
-  { key: 'боевик',       title: '20 лучших боевиков',                titleEn: 'Top 20 action movies',      short: 'Боевики',     shortEn: 'Action' },
-  { key: 'драма',        title: '20 лучших драм',                    titleEn: 'Top 20 dramas',             short: 'Драмы',       shortEn: 'Drama' },
-  { key: 'комедия',      title: '20 лучших комедий',                 titleEn: 'Top 20 comedies',           short: 'Комедии',     shortEn: 'Comedy' },
-  { key: 'фантастика',   title: '20 лучших фантастических фильмов',  titleEn: 'Top 20 sci-fi movies',      short: 'Фантастика',  shortEn: 'Sci-Fi' },
-  { key: 'триллер',      title: '20 лучших триллеров',               titleEn: 'Top 20 thrillers',          short: 'Триллеры',    shortEn: 'Thrillers' },
-  { key: 'ужасы',        title: '20 лучших ужасов',                  titleEn: 'Top 20 horror movies',      short: 'Ужасы',       shortEn: 'Horror' },
-  { key: 'криминал',     title: '20 лучших криминальных фильмов',    titleEn: 'Top 20 crime movies',       short: 'Криминал',    shortEn: 'Crime' },
-  { key: 'мелодрама',    title: '20 лучших романтических фильмов',   titleEn: 'Top 20 romance movies',     short: 'Романтика',   shortEn: 'Romance' },
-  { key: 'фэнтези',      title: '20 лучших фэнтези',                 titleEn: 'Top 20 fantasy movies',     short: 'Фэнтези',     shortEn: 'Fantasy' },
-  { key: 'детектив',     title: '20 лучших детективов',              titleEn: 'Top 20 mystery movies',     short: 'Детективы',   shortEn: 'Mystery' },
-  { key: 'приключения',  title: '20 лучших приключений',             titleEn: 'Top 20 adventure movies',   short: 'Приключения', shortEn: 'Adventure' },
-  { key: 'мультфильм',   title: '20 лучших мультфильмов',            titleEn: 'Top 20 animated movies',    short: 'Мультфильмы', shortEn: 'Animation' },
-  { key: 'история',      title: '20 лучших исторических фильмов',    titleEn: 'Top 20 historical movies',  short: 'Историческое',shortEn: 'History' },
-  { key: 'военный',      title: '20 лучших военных фильмов',         titleEn: 'Top 20 war movies',         short: 'Военные',     shortEn: 'War' }
-];
-
-/* Подборки по настроению (используем уже существующую логику категорий из
-   filmCategories.js — но для каталога достаточно сопоставить настроение с
-   жанрами TMDB, чтобы получить готовые ленты). */
-export const CATALOG_MOODS = [
-  { id: 'mood-light',   title: 'Лёгкое и доброе',        titleEn: 'Light and feel-good', genres: ['комедия', 'мелодрама', 'семейный', 'мультфильм'] },
-  { id: 'mood-tense',   title: 'Напряжённое',            titleEn: 'Tense',               genres: ['триллер', 'детектив', 'криминал'] },
-  { id: 'mood-think',   title: 'Заставляет задуматься',  titleEn: 'Makes you think',     genres: ['драма', 'фантастика', 'история'] },
-  { id: 'mood-epic',    title: 'Эпичное и зрелищное',    titleEn: 'Epic and spectacular',genres: ['приключения', 'фэнтези', 'боевик'] }
-];
-
-/* ── Подборки по странам ───────────────────────────────────────────
-   Используем TMDB discover с with_origin_country (+ родной язык как
-   уточнение). Сортировка — по КАЧЕСТВУ (взвешенный рейтинг), а не по
-   голой популярности: minVotes держит малопопулярные тайтлы у среднего,
-   чтобы случайная высокая оценка не вытаскивала мусор наверх.
-   voteGte/minVotes подобраны под объём индустрии (для Казахстана ниже). */
-export const CATALOG_COUNTRIES = [
-  { code: 'KZ', lang: 'kk', title: 'Казахские фильмы',     titleEn: 'Kazakh movies',   icon: 'globe', voteGte: 5,   minVotes: 20,  meanVote: 6.0 },
-  { code: 'RU', lang: 'ru', title: 'Российские фильмы',    titleEn: 'Russian movies',  icon: 'globe', voteGte: 60,  minVotes: 200, meanVote: 6.2 },
-  { code: 'IN', lang: 'hi', title: 'Индийские фильмы',     titleEn: 'Indian movies',   icon: 'globe', voteGte: 60,  minVotes: 200, meanVote: 6.3 },
-  { code: 'US', lang: 'en', title: 'Американские фильмы',  titleEn: 'American movies', icon: 'globe', voteGte: 300, minVotes: 800, meanVote: 6.6 },
-  { code: 'KR', lang: 'ko', title: 'Корейские фильмы',     titleEn: 'Korean movies',   icon: 'globe', voteGte: 80,  minVotes: 250, meanVote: 6.5 },
-  { code: 'JP', lang: 'ja', title: 'Японские фильмы',      titleEn: 'Japanese movies', icon: 'globe', voteGte: 80,  minVotes: 250, meanVote: 6.5 },
-  { code: 'CN', lang: 'zh', title: 'Китайские фильмы',     titleEn: 'Chinese movies',  icon: 'globe', voteGte: 40,  minVotes: 150, meanVote: 6.3 },
-  { code: 'FR', lang: 'fr', title: 'Французские фильмы',   titleEn: 'French movies',   icon: 'globe', voteGte: 80,  minVotes: 250, meanVote: 6.4 },
-  { code: 'GB', lang: 'en', title: 'Британские фильмы',    titleEn: 'British movies',  icon: 'globe', voteGte: 150, minVotes: 500, meanVote: 6.6 },
-  { code: 'TR', lang: 'tr', title: 'Турецкие фильмы',      titleEn: 'Turkish movies',  icon: 'globe', voteGte: 20,  minVotes: 80,  meanVote: 6.2 },
-  { code: 'DE', lang: 'de', title: 'Немецкие фильмы',      titleEn: 'German movies',   icon: 'globe', voteGte: 80,  minVotes: 250, meanVote: 6.4 },
-  { code: 'ES', lang: 'es', title: 'Испанские фильмы',     titleEn: 'Spanish movies',  icon: 'globe', voteGte: 80,  minVotes: 250, meanVote: 6.4 }
-];
-
-/* ── Тематические подборки (конфиг → discover) ─────────────────────
-   Каждая подборка описывается декларативно: тип медиа, параметры discover
-   (жанры/даты/рейтинги/страны/ключевые слова), параметры скоринга и способ
-   сортировки. Это позволяет добавлять десятки подборок без нового кода.
-
-   Поля:
-     id, title, desc, icon — для UI;
-     media — 'movie' | 'tv';
-     genres — канонические русские имена жанров (→ with_genres, OR);
-     excludeGenres — жанры в without_genres;
-     keywords — англоязычные термины (резолвятся в with_keywords);
-     lang — with_original_language;
-     country — with_origin_country;
-     dateFrom/dateTo — окно релиза (primary_release_date / first_air_date);
-     voteGte — vote_count.gte; ratingGte — vote_average.gte;
-     sort — 'score' (взвешенный) | 'popularity' | 'date';
-     pages, limit, minVotes, meanVote. */
-export const CATALOG_COLLECTIONS = [
-  { id: 'best-all-time', title: 'Лучшие фильмы за всё время', titleEn: 'Best movies of all time', desc: 'Золотой фонд кино', descEn: 'The golden age of cinema', icon: 'trophy',
-    media: 'movie', voteGte: 3000, sort: 'score', minVotes: 3000, meanVote: 7.0, pages: 5, limit: 50 },
-  { id: 'best-series-all-time', title: 'Лучшие сериалы', titleEn: 'Best TV series', desc: 'Главные шоу', descEn: 'The essential shows', icon: 'tv',
-    media: 'tv', voteGte: 800, sort: 'score', minVotes: 800, meanVote: 6.9, pages: 4, limit: 50 },
-  { id: 'new-releases', title: 'Новинки', titleEn: 'New releases', desc: 'Свежие премьеры', descEn: 'Fresh premieres', icon: 'sparkles',
-    media: 'movie', recentDays: 150, voteGte: 40, sort: 'popularity', pages: 4, limit: 40 },
-  { id: 'popular-now', title: 'Популярное сейчас', titleEn: 'Popular now', desc: 'У всех на слуху', descEn: 'Everyone is talking about it', icon: 'flame', special: 'trending', limit: 30 },
-  { id: 'high-rating', title: 'Фильмы с высоким рейтингом', titleEn: 'Highly rated movies', desc: 'Оценка 7.5+', descEn: 'Rated 7.5+', icon: 'star',
-    media: 'movie', voteGte: 2000, ratingGte: 7.5, sort: 'score', minVotes: 2000, meanVote: 7.2, pages: 5, limit: 50 },
-  { id: 'underrated', title: 'Недооценённые фильмы', titleEn: 'Underrated movies', desc: 'Хорошие, но незаметные', descEn: 'Great but overlooked', icon: 'gem',
-    media: 'movie', voteGte: 150, voteLte: 1800, ratingGte: 7.3, sort: 'score', minVotes: 250, meanVote: 6.8, pages: 5, limit: 40 },
-  { id: 'anime', title: 'Лучшие аниме', titleEn: 'Best anime', desc: 'Японская анимация', descEn: 'Japanese animation', icon: 'toon',
-    media: 'tv', genres: ['мультфильм'], lang: 'ja', voteGte: 100, sort: 'score', minVotes: 200, meanVote: 6.8, pages: 4, limit: 50 },
-  { id: 'anime-shonen', title: 'Аниме как «Наруто»', titleEn: 'Anime like “Naruto”', desc: 'Сёнэн и приключения', descEn: 'Shonen and adventure', icon: 'bolt',
-    media: 'tv', genres: ['мультфильм', 'боевик', 'приключения'], lang: 'ja', keywords: ['anime', 'based on manga'], voteGte: 60, sort: 'popularity', pages: 4, limit: 40 },
-  { id: 'family', title: 'Семейные фильмы', titleEn: 'Family movies', desc: 'Для всей семьи', descEn: 'For the whole family', icon: 'family',
-    media: 'movie', genres: ['семейный', 'мультфильм'], voteGte: 400, sort: 'score', minVotes: 500, meanVote: 6.6, pages: 4, limit: 40 },
-  { id: 'feel-evening', title: 'Фильмы на вечер', titleEn: 'Movies for the evening', desc: 'Идеально под настроение', descEn: 'Perfect for the mood', icon: 'sun',
-    media: 'movie', genres: ['комедия', 'мелодрама', 'приключения'], voteGte: 600, sort: 'score', minVotes: 700, meanVote: 6.6, pages: 4, limit: 40 },
-  { id: 'feel-dark', title: 'Мрачные фильмы', titleEn: 'Dark movies', desc: 'Тяжёлая атмосфера', descEn: 'Heavy atmosphere', icon: 'moon',
-    media: 'movie', genres: ['триллер', 'ужасы', 'криминал', 'драма'], keywords: ['dark', 'neo-noir'], voteGte: 500, sort: 'score', minVotes: 600, meanVote: 6.6, pages: 4, limit: 40 },
-  { id: 'twist-ending', title: 'Фильмы с неожиданной концовкой', titleEn: 'Movies with a twist ending', desc: 'Финал-перевёртыш', descEn: 'A finale that flips it all', icon: 'shuffle',
-    media: 'movie', keywords: ['twist ending', 'plot twist'], voteGte: 400, sort: 'score', minVotes: 500, meanVote: 6.6, pages: 4, limit: 40 },
-  { id: 'theme-travel', title: 'Фильмы про путешествия', titleEn: 'Movies about travel', desc: 'Дорога и открытия', descEn: 'The road and discovery', icon: 'plane',
-    media: 'movie', keywords: ['travel', 'road trip', 'journey'], voteGte: 300, sort: 'score', minVotes: 400, meanVote: 6.4, pages: 4, limit: 40 },
-  { id: 'theme-sport', title: 'Фильмы про спорт', titleEn: 'Movies about sports', desc: 'Победы и характер', descEn: 'Victories and character', icon: 'ball',
-    media: 'movie', keywords: ['sport', 'boxing', 'football'], voteGte: 200, sort: 'score', minVotes: 350, meanVote: 6.4, pages: 4, limit: 40 },
-  { id: 'theme-business', title: 'Фильмы про бизнес и деньги', titleEn: 'Movies about business and money', desc: 'Амбиции и капитал', descEn: 'Ambition and capital', icon: 'briefcase',
-    media: 'movie', keywords: ['business', 'wall street', 'entrepreneur', 'money'], voteGte: 250, sort: 'score', minVotes: 400, meanVote: 6.5, pages: 4, limit: 40 },
-  { id: 'theme-school', title: 'Фильмы про школу и университет', titleEn: 'Movies about school and college', desc: 'Юность и взросление', descEn: 'Youth and coming of age', icon: 'grad',
-    media: 'movie', keywords: ['high school', 'college', 'university', 'coming of age'], voteGte: 250, sort: 'score', minVotes: 400, meanVote: 6.4, pages: 4, limit: 40 },
-  { id: 'theme-survival', title: 'Фильмы про выживание', titleEn: 'Movies about survival', desc: 'На грани', descEn: 'On the edge', icon: 'tent',
-    media: 'movie', keywords: ['survival'], genres: ['боевик', 'триллер', 'приключения'], voteGte: 300, sort: 'score', minVotes: 400, meanVote: 6.5, pages: 4, limit: 40 }
-];
-
-/* ── Карта жанров name → id (инвертируем getGenreNameMap) ──────────── */
 async function genreNameToId(deps) {
   const cached = getCached('__genreNameToId');
   if (cached) return cached;
-  const byId = await deps.getGenreNameMap(deps.tmdbFetch); // id → каноническое имя
+  const byId = await deps.getGenreNameMap(deps.tmdbFetch);
   const byName = new Map();
   for (const [id, name] of byId) {
     if (!byName.has(name)) byName.set(name, id);
@@ -177,20 +69,18 @@ async function genreNameToId(deps) {
   return setCached('__genreNameToId', byName);
 }
 
-/* Превращает genre_ids кандидата в русские имена жанров. */
-function mapGenreIds(genreIds, idToName) {
-  return (genreIds || []).map((id) => idToName.get(id)).filter(Boolean);
-}
-
 async function genreIdToName(deps) {
   return deps.getGenreNameMap(deps.tmdbFetch);
 }
 
-/* ── Маппинг сырого результата TMDB в карточку каталога ───────────── */
+function mapGenreIds(genreIds, idToName) {
+  return (genreIds || []).map((id) => idToName.get(id)).filter(Boolean);
+}
+
 function mapItem(deps, raw, mediaType, idToName) {
   const releaseDate = raw.release_date || raw.first_air_date || null;
   const title = raw.title || raw.name || '';
-  const item = {
+  return {
     tmdbId: raw.id,
     title,
     originalTitle: raw.original_title || raw.original_name || null,
@@ -203,35 +93,94 @@ function mapItem(deps, raw, mediaType, idToName) {
     genres: mapGenreIds(raw.genre_ids, idToName),
     voteAverage: raw.vote_average || 0,
     voteCount: raw.vote_count || 0,
-    popularity: raw.popularity || 0
+    popularity: raw.popularity || 0,
+    originalLanguage: raw.original_language || null,
+    originCountry: (raw.origin_country && raw.origin_country[0]) || null
   };
-  return item;
 }
 
-/* finalizeItems — считает взвешенный/смешанный балл, сортирует, режет до
-   limit. Удаляет дубли по tmdbId. Добавляет siteRating в карточку. */
-function finalizeItems(deps, items, { limit = 20, scoreOpts = {}, sortBy = 'score' } = {}) {
+function passesContentType(item, contentType) {
+  if (!contentType) return true;
+  const lang = String(item.originalLanguage || '').toLowerCase();
+  const genres = (item.genres || []).map((g) => String(g).toLowerCase());
+  const animated = genres.some((g) => /мульт|анимац/.test(g));
+  if (contentType === 'anime') return lang === 'ja' && animated;
+  if (contentType === 'western-animation') return animated && lang !== 'ja';
+  return true;
+}
+
+function buildUserExcludes(userContext) {
+  const blockedTitles = new Set();
+  const blockedTmdb = new Set();
+  if (!userContext?.movies?.length) {
+    return { blockedTitles, blockedTmdb, tasteProfile: null };
+  }
+  const tasteProfile = buildUserTasteProfile(userContext.movies, userContext.prefs || {});
+  for (const m of userContext.movies) {
+    const titleKey = normalizeWatchTitle(m.title);
+    if (titleKey) blockedTitles.add(titleKey);
+    if (m.tmdbId) blockedTmdb.add(`${m.mediaType || 'movie'}:${m.tmdbId}`);
+  }
+  for (const t of tasteProfile.blacklistTitles) blockedTitles.add(t);
+  for (const t of tasteProfile.feedbackBlockedTitles) blockedTitles.add(t);
+  return { blockedTitles, blockedTmdb, tasteProfile };
+}
+
+function filterExcluded(items, userContext) {
+  const { blockedTitles, blockedTmdb } = buildUserExcludes(userContext);
+  const prefs = userContext?.prefs || {};
+  return items.filter((it) => {
+    const key = `${it.mediaType}:${it.tmdbId}`;
+    const titleKey = normalizeWatchTitle(it.title);
+    if (blockedTmdb.has(key) || blockedTitles.has(titleKey)) return false;
+    if (prefs.blacklist && matchesBlacklist({ title: it.title, genres: it.genres, meta: { year: it.year } }, prefs.blacklist)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function finalizeItems(deps, items, {
+  limit = 20, scoreOpts = {}, sortBy = 'score', userContext = null, contentType = null
+} = {}) {
   const seen = new Set();
   const scored = [];
+  const { tasteProfile } = buildUserExcludes(userContext);
+
   for (const it of items) {
     if (!it.tmdbId || !it.poster || !it.title) continue;
+    if (!passesContentType(it, contentType)) continue;
     const key = `${it.mediaType}:${it.tmdbId}`;
     if (seen.has(key)) continue;
     seen.add(key);
+
     const siteRating = deps.getSiteRating
       ? deps.getSiteRating({ tmdbId: it.tmdbId, mediaType: it.mediaType, title: it.title })
       : null;
     it.siteRating = siteRating || null;
     it.weightedScore = Number(blendedScore(it, siteRating, scoreOpts).toFixed(3));
+
+    let personalBoost = 0;
+    if (tasteProfile) {
+      const personal = scoreMovieForUser(
+        { ...it, genres: (it.genres || []).map(canonicalGenre) },
+        tasteProfile,
+        { mode: 'personal' }
+      );
+      if (Number.isFinite(personal.score)) {
+        personalBoost = clamp(personal.score * 0.12, -0.15, 0.15);
+      }
+    }
+    it.sortScore = it.weightedScore + personalBoost;
     scored.push(it);
   }
+
   if (sortBy === 'popularity') scored.sort((a, b) => b.popularity - a.popularity);
-  else scored.sort((a, b) => b.weightedScore - a.weightedScore);
+  else scored.sort((a, b) => (b.sortScore ?? b.weightedScore) - (a.sortScore ?? a.weightedScore));
+
   return scored.slice(0, limit);
 }
 
-/* fetchDiscoverPages — тянет несколько страниц /discover и собирает сырые
-   результаты. Не падает, если TMDB недоступен (возвращает что есть). */
 async function fetchDiscoverPages(deps, type, params, pages = 2) {
   const out = [];
   for (let page = 1; page <= pages; page += 1) {
@@ -243,138 +192,6 @@ async function fetchDiscoverPages(deps, type, params, pages = 2) {
   return out;
 }
 
-/* ===================================================================
-   ПОДБОРКИ
-   =================================================================== */
-
-/* Подборка по жанру (фильмы). Берём фильмы с нормальным числом голосов
-   (vote_count.gte), затем пересортировываем по взвешенному баллу. */
-async function buildGenreCollection(deps, genreKey, limit = 20) {
-  const idToName = await genreIdToName(deps);
-  const nameToId = await genreNameToId(deps);
-  const genreId = nameToId.get(genreKey);
-  if (!genreId) return [];
-  const raw = await fetchDiscoverPages(deps, 'movie', {
-    sort_by: 'vote_count.desc',
-    include_adult: 'false',
-    'vote_count.gte': '500',
-    with_genres: String(genreId)
-  }, 3);
-  const items = raw.map((r) => mapItem(deps, r, 'movie', idToName));
-  return finalizeItems(deps, items, { limit, scoreOpts: { minVotes: 600, meanVote: 6.6 } });
-}
-
-/* Лучшие сериалы. */
-async function buildTopSeries(deps, limit = 20) {
-  const idToName = await genreIdToName(deps);
-  const raw = await fetchDiscoverPages(deps, 'tv', {
-    sort_by: 'vote_count.desc',
-    include_adult: 'false',
-    'vote_count.gte': '300'
-  }, 3);
-  const items = raw.map((r) => mapItem(deps, r, 'tv', idToName));
-  return finalizeItems(deps, items, { limit, scoreOpts: { minVotes: 400, meanVote: 6.8 } });
-}
-
-/* Лучшие фильмы последних лет (последние 3 года). */
-async function buildBestRecent(deps, limit = 20) {
-  const idToName = await genreIdToName(deps);
-  const year = new Date().getFullYear();
-  const from = `${year - 3}-01-01`;
-  const raw = await fetchDiscoverPages(deps, 'movie', {
-    sort_by: 'vote_count.desc',
-    include_adult: 'false',
-    'vote_count.gte': '300',
-    'primary_release_date.gte': from
-  }, 3);
-  const items = raw.map((r) => mapItem(deps, r, 'movie', idToName));
-  return finalizeItems(deps, items, { limit, scoreOpts: { minVotes: 400, meanVote: 6.5 } });
-}
-
-/* Самые популярные фильмы (по популярности TMDB, не по качеству). */
-async function buildMostPopular(deps, limit = 20) {
-  const idToName = await genreIdToName(deps);
-  const data = await deps.tmdbFetch('/trending/movie/week', {});
-  const items = (data?.results || []).map((r) => mapItem(deps, r, 'movie', idToName));
-  return finalizeItems(deps, items, { limit, sortBy: 'popularity' });
-}
-
-/* Самые кассовые фильмы (по сборам, если данные доступны). */
-async function buildHighestGrossing(deps, limit = 20) {
-  const idToName = await genreIdToName(deps);
-  const raw = await fetchDiscoverPages(deps, 'movie', {
-    sort_by: 'revenue.desc',
-    include_adult: 'false',
-    'vote_count.gte': '300'
-  }, 2);
-  const items = raw.map((r) => mapItem(deps, r, 'movie', idToName));
-  // Здесь сортировка не по баллу, а сохраняем порядок TMDB по сборам —
-  // но всё равно считаем weightedScore для карточек.
-  finalizeItems(deps, items, { limit: items.length });
-  const seen = new Set();
-  const out = [];
-  for (const it of items) {
-    if (!it.tmdbId || !it.poster) continue;
-    const key = `${it.mediaType}:${it.tmdbId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(it);
-    if (out.length >= limit) break;
-  }
-  return out;
-}
-
-/* Подборка по настроению (объединяем несколько жанров). */
-async function buildMoodCollection(deps, mood, limit = 20) {
-  const idToName = await genreIdToName(deps);
-  const nameToId = await genreNameToId(deps);
-  const ids = mood.genres.map((g) => nameToId.get(g)).filter(Boolean);
-  if (!ids.length) return [];
-  const raw = await fetchDiscoverPages(deps, 'movie', {
-    sort_by: 'vote_count.desc',
-    include_adult: 'false',
-    'vote_count.gte': '400',
-    with_genres: ids.join('|')
-  }, 3);
-  const items = raw.map((r) => mapItem(deps, r, 'movie', idToName));
-  return finalizeItems(deps, items, { limit, scoreOpts: { minVotes: 500, meanVote: 6.6 } });
-}
-
-/* 200 лучших за всё время. filter: 'all' | 'movie' | 'tv'.
-   Собираем top_rated с нескольких страниц, считаем взвешенный балл,
-   сортируем и режем до 200. Малоизвестное отсекается порогом голосов. */
-async function buildTop200(deps, filter = 'all') {
-  const idToName = await genreIdToName(deps);
-  const collect = async (type, pages, voteGte) => {
-    const raw = await fetchDiscoverPages(deps, type, {
-      sort_by: 'vote_count.desc',
-      include_adult: 'false',
-      'vote_count.gte': String(voteGte)
-    }, pages);
-    return raw.map((r) => mapItem(deps, r, type, idToName));
-  };
-
-  let items = [];
-  if (filter === 'movie') {
-    items = await collect('movie', 12, 1000);
-  } else if (filter === 'tv') {
-    items = await collect('tv', 12, 400);
-  } else {
-    const [movies, tv] = await Promise.all([
-      collect('movie', 10, 1000),
-      collect('tv', 6, 400)
-    ]);
-    items = [...movies, ...tv];
-  }
-  return finalizeItems(deps, items, {
-    limit: 200,
-    scoreOpts: { minVotes: 1500, meanVote: 6.8 }
-  });
-}
-
-/* ── Резолвинг англоязычных тем в keyword id TMDB ──────────────────
-   keyword-индекс TMDB англоязычный, поэтому ищем по en-US и берём
-   первый релевантный id каждого термина. Результат кешируется. */
 async function resolveKeywordIds(deps, queries = []) {
   const ids = [];
   for (const q of queries) {
@@ -392,28 +209,137 @@ async function resolveKeywordIds(deps, queries = []) {
   return ids;
 }
 
-/* Подборка по странам: фильмы конкретной страны/языка, отсортированные по
-   качеству (взвешенный рейтинг). Берём 30–50 тайтлов. */
-async function buildCountryCollection(deps, country, limit = 40) {
+async function buildTopSeries(deps, limit = 20, userContext = null) {
   const idToName = await genreIdToName(deps);
-  const params = {
+  const raw = await fetchDiscoverPages(deps, 'tv', {
     sort_by: 'vote_count.desc',
     include_adult: 'false',
-    'vote_count.gte': String(country.voteGte || 60),
-    with_origin_country: country.code
-  };
-  if (country.lang) params.with_original_language = country.lang;
-  const raw = await fetchDiscoverPages(deps, 'movie', params, 4);
-  const items = raw.map((r) => mapItem(deps, r, 'movie', idToName));
-  return finalizeItems(deps, items, {
-    limit: country.limit || limit,
-    scoreOpts: { minVotes: country.minVotes || 200, meanVote: country.meanVote || 6.4 }
+    'vote_count.gte': '300'
+  }, 3);
+  const items = raw.map((r) => mapItem(deps, r, 'tv', idToName));
+  return finalizeItems(deps, filterExcluded(items, userContext), {
+    limit, scoreOpts: { minVotes: 400, meanVote: 6.8 }, userContext
   });
 }
 
-/* Generic-подборка по декларативному конфигу (CATALOG_COLLECTIONS). */
-async function buildConfigCollection(deps, cfg) {
-  if (cfg.special === 'trending') return buildMostPopular(deps, cfg.limit || 30);
+async function buildBestRecent(deps, limit = 20, userContext = null) {
+  const idToName = await genreIdToName(deps);
+  const year = new Date().getFullYear();
+  const from = `${year - 3}-01-01`;
+  const raw = await fetchDiscoverPages(deps, 'movie', {
+    sort_by: 'vote_count.desc',
+    include_adult: 'false',
+    'vote_count.gte': '300',
+    'primary_release_date.gte': from
+  }, 3);
+  const items = raw.map((r) => mapItem(deps, r, 'movie', idToName));
+  return finalizeItems(deps, filterExcluded(items, userContext), {
+    limit, scoreOpts: { minVotes: 400, meanVote: 6.5 }, userContext
+  });
+}
+
+async function buildMostPopular(deps, limit = 20, media = 'movie', userContext = null) {
+  const idToName = await genreIdToName(deps);
+  const path = media === 'tv' ? '/trending/tv/week' : '/trending/movie/week';
+  const data = await deps.tmdbFetch(path, {});
+  const type = media === 'tv' ? 'tv' : 'movie';
+  const items = (data?.results || []).map((r) => mapItem(deps, r, type, idToName));
+  return finalizeItems(deps, filterExcluded(items, userContext), {
+    limit, sortBy: 'popularity', userContext
+  });
+}
+
+async function buildTrendingMixed(deps, limit = 30, userContext = null) {
+  const [movies, tv] = await Promise.all([
+    buildMostPopular(deps, Math.ceil(limit * 0.6), 'movie', userContext),
+    buildMostPopular(deps, Math.ceil(limit * 0.6), 'tv', userContext)
+  ]);
+  const merged = [...movies, ...tv];
+  merged.sort((a, b) => b.popularity - a.popularity);
+  return merged.slice(0, limit);
+}
+
+async function buildNewReleasesMixed(deps, cfg, userContext = null) {
+  const idToName = await genreIdToName(deps);
+  const recentDays = cfg.recentDays || 150;
+  const from = new Date(Date.now() - recentDays * 86400000).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const pool = [];
+  for (const type of ['movie', 'tv']) {
+    const params = {
+      sort_by: 'popularity.desc',
+      include_adult: 'false',
+      'vote_count.gte': String(cfg.voteGte || 40)
+    };
+    if (type === 'tv') {
+      params['first_air_date.gte'] = from;
+      params['first_air_date.lte'] = today;
+    } else {
+      params['primary_release_date.gte'] = from;
+      params['primary_release_date.lte'] = today;
+    }
+    const raw = await fetchDiscoverPages(deps, type, params, cfg.pages || 3);
+    pool.push(...raw.map((r) => mapItem(deps, r, type, idToName)));
+  }
+  return finalizeItems(deps, filterExcluded(pool, userContext), {
+    limit: cfg.limit || 40,
+    scoreOpts: { minVotes: cfg.minVotes || 200, meanVote: cfg.meanVote || 6.4 },
+    sortBy: 'popularity',
+    userContext
+  });
+}
+
+async function buildHighestGrossing(deps, limit = 20, userContext = null) {
+  const idToName = await genreIdToName(deps);
+  const raw = await fetchDiscoverPages(deps, 'movie', {
+    sort_by: 'revenue.desc',
+    include_adult: 'false',
+    'vote_count.gte': '300'
+  }, 2);
+  const items = raw.map((r) => mapItem(deps, r, 'movie', idToName));
+  finalizeItems(deps, items, { limit: items.length });
+  const seen = new Set();
+  const out = [];
+  for (const it of filterExcluded(items, userContext)) {
+    if (!it.tmdbId || !it.poster) continue;
+    const key = `${it.mediaType}:${it.tmdbId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(it);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+async function buildMultiCountryCollection(deps, cfg, userContext = null) {
+  const idToName = await genreIdToName(deps);
+  const pool = [];
+  for (const code of (cfg.countries || [])) {
+    const params = {
+      sort_by: 'vote_count.desc',
+      include_adult: 'false',
+      'vote_count.gte': String(cfg.voteGte || 60),
+      with_origin_country: code
+    };
+    const raw = await fetchDiscoverPages(deps, 'movie', params, 2);
+    pool.push(...raw.map((r) => mapItem(deps, r, 'movie', idToName)));
+  }
+  return finalizeItems(deps, filterExcluded(pool, userContext), {
+    limit: cfg.limit || 40,
+    scoreOpts: { minVotes: cfg.minVotes || 200, meanVote: cfg.meanVote || 6.4 },
+    userContext
+  });
+}
+
+async function buildConfigCollection(deps, cfg, userContext = null) {
+  if (cfg.special === 'trending') return buildMostPopular(deps, cfg.limit || 20, 'movie', userContext);
+  if (cfg.special === 'trending-tv') return buildMostPopular(deps, cfg.limit || 20, 'tv', userContext);
+  if (cfg.special === 'trending-mixed') return buildTrendingMixed(deps, cfg.limit || 30, userContext);
+  if (cfg.special === 'new-releases-mixed') return buildNewReleasesMixed(deps, cfg, userContext);
+  if (cfg.special === 'best-recent') return buildBestRecent(deps, cfg.limit || 20, userContext);
+  if (cfg.special === 'highest-grossing') return buildHighestGrossing(deps, cfg.limit || 20, userContext);
+  if (cfg.special === 'top-series') return buildTopSeries(deps, cfg.limit || 20, userContext);
+  if (cfg.countries?.length) return buildMultiCountryCollection(deps, cfg, userContext);
 
   const media = cfg.media === 'tv' ? 'tv' : 'movie';
   const idToName = await genreIdToName(deps);
@@ -431,15 +357,19 @@ async function buildConfigCollection(deps, cfg) {
   if (cfg.lang) params.with_original_language = cfg.lang;
   if (cfg.country) params.with_origin_country = cfg.country;
 
-  if (cfg.genres && cfg.genres.length) {
-    const ids = cfg.genres.map((g) => nameToId.get(g)).filter(Boolean);
+  const genreList = [...(cfg.genres || [])];
+  if (cfg.contentType === 'anime' || cfg.contentType === 'western-animation') {
+    if (!genreList.includes('мультфильм')) genreList.push('мультфильм');
+  }
+  if (genreList.length) {
+    const ids = genreList.map((g) => nameToId.get(g)).filter(Boolean);
     if (ids.length) params.with_genres = ids.join('|');
   }
-  if (cfg.excludeGenres && cfg.excludeGenres.length) {
+  if (cfg.excludeGenres?.length) {
     const ids = cfg.excludeGenres.map((g) => nameToId.get(g)).filter(Boolean);
     if (ids.length) params.without_genres = ids.join(',');
   }
-  if (cfg.keywords && cfg.keywords.length) {
+  if (cfg.keywords?.length) {
     const kwIds = await resolveKeywordIds(deps, cfg.keywords);
     if (kwIds.length) params.with_keywords = kwIds.join('|');
   }
@@ -449,172 +379,83 @@ async function buildConfigCollection(deps, cfg) {
     if (media === 'tv') { params['first_air_date.gte'] = from; params['first_air_date.lte'] = today; }
     else { params['primary_release_date.gte'] = from; params['primary_release_date.lte'] = today; }
   }
+  if (cfg.dateTo) {
+    if (media === 'tv') params['first_air_date.lte'] = cfg.dateTo;
+    else params['primary_release_date.lte'] = cfg.dateTo;
+  }
 
   const raw = await fetchDiscoverPages(deps, media, params, cfg.pages || 4);
-  const items = raw.map((r) => mapItem(deps, r, media, idToName));
-  return finalizeItems(deps, items, {
+  let items = raw.map((r) => mapItem(deps, r, media, idToName));
+  items = filterExcluded(items, userContext);
+
+  let result = finalizeItems(deps, items, {
     limit: cfg.limit || 40,
     scoreOpts: { minVotes: cfg.minVotes || 400, meanVote: cfg.meanVote || 6.6 },
-    sortBy: cfg.sort === 'popularity' || cfg.sort === 'date' ? 'popularity' : 'score'
+    sortBy: cfg.sort === 'popularity' || cfg.sort === 'date' ? 'popularity' : 'score',
+    userContext,
+    contentType: cfg.contentType || null
+  });
+
+  if (result.length < Math.min(8, (cfg.limit || 20) / 2) && cfg.fallback) {
+    const fb = getReadyCollection(cfg.fallback);
+    if (fb && fb.id !== cfg.id) {
+      const fbItems = await buildConfigCollection(deps, fb, userContext);
+      const seen = new Set(result.map((r) => `${r.mediaType}:${r.tmdbId}`));
+      for (const it of fbItems) {
+        const k = `${it.mediaType}:${it.tmdbId}`;
+        if (!seen.has(k)) { result.push(it); seen.add(k); }
+        if (result.length >= (cfg.limit || 20)) break;
+      }
+    }
+  }
+
+  return result.slice(0, cfg.limit || 40);
+}
+
+async function buildTop200(deps, filter = 'all', userContext = null) {
+  const idToName = await genreIdToName(deps);
+  const collect = async (type, pages, voteGte) => {
+    const raw = await fetchDiscoverPages(deps, type, {
+      sort_by: 'vote_count.desc',
+      include_adult: 'false',
+      'vote_count.gte': String(voteGte)
+    }, pages);
+    return raw.map((r) => mapItem(deps, r, type, idToName));
+  };
+
+  let items = [];
+  if (filter === 'movie') items = await collect('movie', 12, 1000);
+  else if (filter === 'tv') items = await collect('tv', 12, 400);
+  else {
+    const [movies, tv] = await Promise.all([collect('movie', 10, 1000), collect('tv', 6, 400)]);
+    items = [...movies, ...tv];
+  }
+  return finalizeItems(deps, filterExcluded(items, userContext), {
+    limit: 200,
+    scoreOpts: { minVotes: 1500, meanVote: 6.8 },
+    userContext
   });
 }
 
-/* ── Реестр подборок (id → builder) ───────────────────────────────── */
 function builderFor(id) {
-  if (id === 'top-series') return (deps) => buildTopSeries(deps);
-  if (id === 'best-recent') return (deps) => buildBestRecent(deps);
-  if (id === 'most-popular') return (deps) => buildMostPopular(deps);
-  if (id === 'highest-grossing') return (deps) => buildHighestGrossing(deps);
-
-  const cfg = CATALOG_COLLECTIONS.find((c) => c.id === id);
-  if (cfg) return (deps) => buildConfigCollection(deps, cfg);
-
-  const country = CATALOG_COUNTRIES.find((c) => `country-${c.code}` === id);
-  if (country) return (deps) => buildCountryCollection(deps, country);
-
-  const genre = CATALOG_GENRES.find((g) => `genre-${g.key}` === id);
-  if (genre) return (deps) => buildGenreCollection(deps, genre.key);
-
-  const mood = CATALOG_MOODS.find((m) => m.id === id);
-  if (mood) return (deps) => buildMoodCollection(deps, mood);
-
+  const cfg = getReadyCollection(id);
+  if (cfg) return (deps, userContext) => buildConfigCollection(deps, cfg, userContext);
   return null;
 }
 
-/* ── Метаданные подборок (иконка + короткое описание) для UI ────────
-   desc — русское описание, descEn — английское (для полной локализации). */
-const SPECIAL_META = {
-  'most-popular':     { icon: 'flame',     desc: 'Сейчас на слуху',  descEn: 'Trending right now' },
-  'best-recent':      { icon: 'star',      desc: 'Высокие оценки',   descEn: 'Highly rated' },
-  'highest-grossing': { icon: 'cash',      desc: 'Хиты проката',     descEn: 'Box-office hits' },
-  'top-series':       { icon: 'tv',        desc: 'Лучшие шоу',       descEn: 'The best shows' }
-};
-const MOOD_META = {
-  'mood-light': { icon: 'sun',       desc: 'Без напряжения',     descEn: 'Easy watching' },
-  'mood-tense': { icon: 'bolt',      desc: 'Триллеры и интрига', descEn: 'Thrillers and intrigue' },
-  'mood-think': { icon: 'bulb',      desc: 'Глубокие сюжеты',    descEn: 'Deep stories' },
-  'mood-epic':  { icon: 'mountains', desc: 'Зрелищное кино',     descEn: 'Spectacular cinema' }
-};
-const GENRE_META = {
-  'боевик':      { icon: 'bolt',    desc: 'Экшен и динамика',         descEn: 'Action and momentum' },
-  'драма':       { icon: 'masks',   desc: 'Сильные истории',          descEn: 'Powerful stories' },
-  'комедия':     { icon: 'smile',   desc: 'Посмеяться',               descEn: 'For a laugh' },
-  'фантастика':  { icon: 'rocket',  desc: 'Будущее и иные миры',      descEn: 'The future and other worlds' },
-  'триллер':     { icon: 'eye',     desc: 'Держит в напряжении',      descEn: 'Keeps you on edge' },
-  'ужасы':       { icon: 'ghost',   desc: 'Страшно по-настоящему',    descEn: 'Genuinely scary' },
-  'криминал':    { icon: 'cuffs',   desc: 'Преступления и нуар',      descEn: 'Crime and noir' },
-  'мелодрама':   { icon: 'heart',   desc: 'О любви',                  descEn: 'About love' },
-  'фэнтези':     { icon: 'wand',    desc: 'Магия и приключения',      descEn: 'Magic and adventure' },
-  'детектив':    { icon: 'search',  desc: 'Загадки и расследования',  descEn: 'Mysteries and investigations' },
-  'приключения': { icon: 'compass', desc: 'Большие приключения',      descEn: 'Big adventures' },
-  'мультфильм':  { icon: 'toon',    desc: 'Анимация для всех',        descEn: 'Animation for everyone' },
-  'история':     { icon: 'scroll',  desc: 'Основано на истории',      descEn: 'Based on history' },
-  'военный':     { icon: 'shield',  desc: 'О войне и людях',          descEn: 'About war and people' }
-};
-
-// Выбор языка: en при английском, иначе русский (с фолбэком на ru).
-function isEn(lang) { return lang === 'en' || lang === 'en-US'; }
-function pick(lang, ru, en) { return isEn(lang) && en ? en : ru; }
-
-function genreSection(g, lang) {
-  const meta = GENRE_META[g.key] || {};
+export function getCatalogIndex(lang = 'ru') {
   return {
-    id: `genre-${g.key}`,
-    title: pick(lang, g.title, g.titleEn),
-    shortTitle: pick(lang, g.short, g.shortEn),
-    kind: 'genre',
-    icon: meta.icon || 'film',
-    desc: pick(lang, meta.desc, meta.descEn) || pick(lang, 'Лучшее в жанре', 'Best in the genre')
+    groups: getCatalogCollectionGroups(lang),
+    hasTop200: true
   };
 }
-function moodSection(m, lang) {
-  const meta = MOOD_META[m.id] || {};
-  const title = pick(lang, m.title, m.titleEn);
-  return { id: m.id, title, shortTitle: title, kind: 'mood', icon: meta.icon || 'film', desc: pick(lang, meta.desc, meta.descEn) || '' };
-}
-function specialSection(id, title, titleEn, lang) {
-  const meta = SPECIAL_META[id] || {};
-  const t = pick(lang, title, titleEn);
-  return { id, title: t, shortTitle: t, kind: 'special', icon: meta.icon || 'film', desc: pick(lang, meta.desc, meta.descEn) || '' };
-}
-function collectionSection(c, lang) {
-  const title = pick(lang, c.title, c.titleEn);
-  return { id: c.id, title, shortTitle: title, kind: 'collection', icon: c.icon || 'film', desc: pick(lang, c.desc, c.descEn) || '' };
-}
-function countrySection(c, lang) {
-  const title = pick(lang, c.title, c.titleEn);
-  return { id: `country-${c.code}`, title, shortTitle: title, kind: 'country', icon: c.icon || 'globe', desc: pick(lang, 'Топ по качеству', 'Top by quality') };
-}
 
-/* getCatalogIndex — лёгкий список подборок (без обращения к TMDB).
-   Фронтенд по нему рисует пустые ленты и подгружает каждую отдельно. */
-export function getCatalogIndex(lang = 'ru') {
-  const sections = [];
-
-  sections.push(specialSection('most-popular', '20 самых популярных', 'Top 20 most popular', lang));
-  sections.push(specialSection('best-recent', '20 лучших за последние годы', 'Top 20 of recent years', lang));
-  sections.push(specialSection('highest-grossing', '20 самых кассовых', 'Top 20 highest-grossing', lang));
-  sections.push(specialSection('top-series', '20 лучших сериалов', 'Top 20 TV series', lang));
-
-  CATALOG_COLLECTIONS.forEach((c) => sections.push(collectionSection(c, lang)));
-  CATALOG_MOODS.forEach((m) => sections.push(moodSection(m, lang)));
-  CATALOG_GENRES.forEach((g) => sections.push(genreSection(g, lang)));
-  CATALOG_COUNTRIES.forEach((c) => sections.push(countrySection(c, lang)));
-
-  return { sections, hasTop200: true };
-}
-
-/* getHomeRails — курируемый, упорядоченный список лент для ГЛАВНОЙ.
-   Фронтенд рисует их как визуальные горизонтальные ленты и лениво
-   подгружает фильмы каждой через /api/catalog/collection/:id. */
 export function getHomeRails(lang = 'ru') {
-  const find = (id) => CATALOG_COLLECTIONS.find((c) => c.id === id);
-  const rails = [];
-
-  // Топы «лучшее за всё время» и «высокий рейтинг» намеренно НЕ дублируем —
-  // они уже есть в каталоге (раздел «Топ»). На главной оставляем то, что
-  // каталог крупно не выносит: новинки, недооценённые, аниме, жанры и т.д.
-  rails.push(specialSection('most-popular', 'Популярное сейчас', 'Popular now', lang));
-  if (find('new-releases')) rails.push(collectionSection(find('new-releases'), lang));
-  rails.push(specialSection('top-series', 'Лучшие сериалы', 'Best TV series', lang));
-  if (find('underrated')) rails.push(collectionSection(find('underrated'), lang));
-  if (find('anime')) rails.push(collectionSection(find('anime'), lang));
-  if (find('anime-shonen')) rails.push(collectionSection(find('anime-shonen'), lang));
-
-  // Жанровые ленты
-  ['боевик', 'драма', 'комедия', 'триллер', 'фантастика', 'ужасы', 'мелодрама', 'детектив']
-    .forEach((key) => {
-      const g = CATALOG_GENRES.find((x) => x.key === key);
-      if (g) rails.push(genreSection(g, lang));
-    });
-
-  // Страны
-  CATALOG_COUNTRIES.forEach((c) => rails.push(countrySection(c, lang)));
-
-  // Тематические в конце
-  ['family', 'feel-evening', 'feel-dark', 'twist-ending', 'theme-travel', 'theme-sport', 'theme-business', 'theme-school', 'theme-survival']
-    .forEach((id) => { const c = find(id); if (c) rails.push(collectionSection(c, lang)); });
-
-  return { rails };
+  return { collections: getHomeCollections(lang) };
 }
 
-/* Коалесинг параллельных сборок: пока одна и та же подборка собирается из
-   TMDB, повторные запросы (например, лента на главной + та же в каталоге, или
-   ретраи фронтенда на «холодном» кеше) переиспользуют один и тот же промис,
-   а не запускают тяжёлую сборку второй раз. */
-const inflight = new Map();
-function coalesce(key, build) {
-  if (inflight.has(key)) return inflight.get(key);
-  const promise = (async () => build())()
-    .finally(() => { inflight.delete(key); });
-  inflight.set(key, promise);
-  return promise;
-}
-
-/* getCatalogCollection — items одной подборки (с кешем по языку).
-   Кеш зависит от языка: названия/описания фильмов из TMDB локализованы. */
-export async function getCatalogCollection(deps, id, lang = 'ru') {
-  const cacheId = `col:${normLang(lang)}:${id}`;
+export async function getCatalogCollection(deps, id, lang = 'ru', userContext = null) {
+  const cacheId = `col:${normLang(lang)}:${id}:${userContext ? 'u' : 'g'}`;
   const cached = getCached(cacheId);
   if (cached) return cached;
   const builder = builderFor(id);
@@ -622,23 +463,20 @@ export async function getCatalogCollection(deps, id, lang = 'ru') {
   return coalesce(cacheId, async () => {
     const fresh = getCached(cacheId);
     if (fresh) return fresh;
-    const items = await builder(deps);
+    const items = await builder(deps, userContext);
     return setCached(cacheId, items);
   });
 }
 
-/* getCatalogTop200 — 200 лучших с фильтром (с кешем по фильтру и языку). */
-export async function getCatalogTop200(deps, filter = 'all', lang = 'ru') {
+export async function getCatalogTop200(deps, filter = 'all', lang = 'ru', userContext = null) {
   const f = ['movie', 'tv', 'all'].includes(filter) ? filter : 'all';
-  const cacheId = `top200:${normLang(lang)}:${f}`;
+  const cacheId = `top200:${normLang(lang)}:${f}:${userContext ? 'u' : 'g'}`;
   const cached = getCached(cacheId);
   if (cached) return cached;
   return coalesce(cacheId, async () => {
     const fresh = getCached(cacheId);
     if (fresh) return fresh;
-    const items = await buildTop200(deps, f);
+    const items = await buildTop200(deps, f, userContext);
     return setCached(cacheId, items);
   });
 }
-
-function normLang(lang) { return (lang === 'en' || lang === 'en-US') ? 'en' : 'ru'; }

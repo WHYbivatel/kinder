@@ -35,6 +35,13 @@
 
   let overlayEl = null;
 
+  const T = (key, fallback, vars) => (window.t ? window.t(key, vars) : fallback);
+
+  function dateLocale() {
+    const lang = window.I18N?.getLang?.() || 'ru';
+    return lang === 'en' ? 'en-US' : lang === 'kk' ? 'kk-KZ' : 'ru-RU';
+  }
+
   function escapeHtml(text) {
     return String(text)
       .replace(/&/g, '&amp;')
@@ -45,7 +52,7 @@
   function formatDate(iso) {
     if (!iso) return '';
     try {
-      return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+      return new Date(iso).toLocaleDateString(dateLocale(), { day: 'numeric', month: 'long', year: 'numeric' });
     } catch { return ''; }
   }
 
@@ -185,7 +192,7 @@
             <p class="panel-hint">${escapeHtml(state.visualTest.profileShortDescription || state.visualTest.profileDescription || '')}</p>
           </div>
           <div class="visual-home-actions">
-            <button type="button" class="btn-primary" id="visual-recs-home-btn">${escapeHtml(T('test.visualRecs', 'Рекомендации по визуальному профилю'))}</button>
+            <button type="button" class="btn-primary" id="visual-recs-home-btn">${escapeHtml(T('test.viewRecs', 'Посмотреть рекомендации'))}</button>
             <button type="button" class="visual-home-secondary" id="visual-retake-home-btn">${escapeHtml(T('test.retake', 'Пройти заново'))}</button>
           </div>
         </div>`;
@@ -219,10 +226,10 @@
 
     if (state.step === 'intro') {
       container.innerHTML = `
-        <p class="visual-eyebrow">Кино-тест по картинкам</p>
-        <h2 id="visual-step-title" class="visual-title">Визуальный тест восприятия</h2>
-        <p class="visual-lead">Это не диагностика и не медицинский тест. Здесь нет правильных ответов — важнее первое ощущение от картинки.</p>
-        <button type="button" class="btn-primary" id="visual-begin-btn">Начать</button>
+        <p class="visual-eyebrow">${escapeHtml(T('test.eyebrowVisual', 'Кино-тест по картинкам'))}</p>
+        <h2 id="visual-step-title" class="visual-title">${escapeHtml(T('test.visualTitle', 'Визуальный тест восприятия'))}</h2>
+        <p class="visual-lead">${escapeHtml(T('test.notDiagnostic', 'Это не диагностика и не медицинский тест. Здесь нет правильных ответов — важнее первое ощущение от картинки.'))}</p>
+        <button type="button" class="btn-primary" id="visual-begin-btn">${escapeHtml(T('test.start', 'Начать'))}</button>
       `;
       container.querySelector('#visual-begin-btn')?.addEventListener('click', () => {
         state.step = 'question';
@@ -234,11 +241,11 @@
 
     if (state.step === 'confirm-exit') {
       container.innerHTML = `
-        <h2 id="visual-step-title" class="visual-title">Выйти из визуального теста?</h2>
-        <p class="visual-lead">Ваши текущие ответы не сохранятся.</p>
+        <h2 id="visual-step-title" class="visual-title">${escapeHtml(T('test.exitTitle', 'Выйти из визуального теста?'))}</h2>
+        <p class="visual-lead">${escapeHtml(T('test.exitLost', 'Ваши текущие ответы не сохранятся.'))}</p>
         <div class="visual-actions">
-          <button type="button" class="btn-primary" id="visual-continue-btn">Продолжить тест</button>
-          <button type="button" class="visual-btn-ghost" id="visual-exit-btn">Выйти</button>
+          <button type="button" class="btn-primary" id="visual-continue-btn">${escapeHtml(T('test.continue', 'Продолжить тест'))}</button>
+          <button type="button" class="visual-btn-ghost" id="visual-exit-btn">${escapeHtml(T('battle.exit', 'Выйти'))}</button>
         </div>
       `;
       container.querySelector('#visual-continue-btn')?.addEventListener('click', () => {
@@ -258,7 +265,7 @@
 
       container.innerHTML = `
         <div class="visual-progress-wrap"><div class="visual-progress-bar" style="width:${progress}%"></div></div>
-        <p class="visual-progress-label">Изображение ${state.currentIndex + 1} из ${state.questions.length}</p>
+        <p class="visual-progress-label">${escapeHtml(T('test.imageProgress', `Изображение ${state.currentIndex + 1} из ${state.questions.length}`, { current: state.currentIndex + 1, total: state.questions.length }))}</p>
         <div class="visual-image-wrap">${sceneHtml}</div>
         <h2 id="visual-step-title" class="visual-question">${escapeHtml(q.text)}</h2>
         <div class="visual-options" role="radiogroup">
@@ -269,13 +276,13 @@
             </button>`).join('')}
         </div>
         <input type="text" class="visual-custom-input" id="visual-custom-text" maxlength="200"
-          placeholder="Можете коротко описать свой вариант, если хотите"
+          placeholder="${escapeHtml(T('test.customPlaceholder', 'Можете коротко описать свой вариант, если хотите'))}"
           value="${escapeHtml(state.customTexts[q.id] || '')}">
         <div class="visual-nav">
-          <button type="button" class="visual-btn-ghost" id="visual-back-btn"${state.currentIndex === 0 ? ' disabled' : ''}>Назад</button>
-          <button type="button" class="btn-primary" id="visual-next-btn">${state.currentIndex === state.questions.length - 1 ? 'Завершить' : 'Далее'}</button>
+          <button type="button" class="visual-btn-ghost" id="visual-back-btn"${state.currentIndex === 0 ? ' disabled' : ''}>${escapeHtml(T('test.back', 'Назад'))}</button>
+          <button type="button" class="btn-primary" id="visual-next-btn">${escapeHtml(state.currentIndex === state.questions.length - 1 ? T('test.finish', 'Завершить') : T('test.next', 'Далее'))}</button>
         </div>
-        <p class="visual-error hidden" id="visual-answer-error">Выберите один из вариантов ответа</p>
+        <p class="visual-error hidden" id="visual-answer-error">${escapeHtml(T('test.selectAnswer', 'Выберите один из вариантов ответа'))}</p>
       `;
 
       container.querySelectorAll('.visual-option').forEach((btn) => {
@@ -318,29 +325,29 @@
       const r = state.result || state.visualTest;
       if (!r) return;
       const guestNotice = state.guestResult
-        ? `<p class="psych-guest-notice">⚠ Результат не сохранится. <button type="button" class="psych-inline-login" id="visual-login-link">Войдите</button>, чтобы хранить историю профиля и получать персональные рекомендации.</p>`
+        ? `<p class="psych-guest-notice">${escapeHtml(T('test.guestNotice', '⚠ Результат не сохранится.'))} <button type="button" class="psych-inline-login" id="visual-login-link">${escapeHtml(T('test.loginLink', 'Войдите'))}</button>${escapeHtml(T('test.guestNoticeTail', ', чтобы хранить историю профиля и получать персональные рекомендации.'))}</p>`
         : '';
       const saveBtn = state.guestResult
-        ? `<button type="button" class="visual-btn-ghost" id="visual-login-save-btn">Войти, чтобы сохранить</button>`
-        : `<button type="button" class="visual-btn-ghost" id="visual-save-btn">Сохранить результат</button>`;
+        ? `<button type="button" class="visual-btn-ghost" id="visual-login-save-btn">${escapeHtml(T('test.loginToSave', 'Войти, чтобы сохранить'))}</button>`
+        : `<button type="button" class="visual-btn-ghost" id="visual-save-btn">${escapeHtml(T('test.saveResult', 'Сохранить результат'))}</button>`;
 
       container.innerHTML = `
-        <p class="visual-eyebrow">Ваш визуальный профиль</p>
+        <p class="visual-eyebrow">${escapeHtml(T('test.resultEyebrow', 'Ваш визуальный профиль'))}</p>
         <h2 id="visual-step-title" class="visual-title">${escapeHtml(r.profileTitle)}</h2>
         <p class="visual-lead">${escapeHtml(r.profileDescription || '')}</p>
         ${guestNotice}
         <div class="visual-scales">${renderScaleBarsHtml(r.scales)}</div>
         <div class="visual-traits">
-          <h3>Что вам может подойти</h3>
+          <h3>${escapeHtml(T('test.maySuit', 'Что вам может подойти'))}</h3>
           <ul>${(r.suits || []).map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>
-          <h3>Что лучше избегать</h3>
+          <h3>${escapeHtml(T('test.avoid', 'Что лучше избегать'))}</h3>
           <ul class="visual-avoid">${(r.avoid || []).map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>
         </div>
         <div class="visual-actions visual-actions--result">
-          <button type="button" class="btn-primary" id="visual-get-recs-btn">Получить рекомендации</button>
+          <button type="button" class="btn-primary" id="visual-get-recs-btn">${escapeHtml(T('test.getRecs', 'Получить рекомендации'))}</button>
           ${saveBtn}
-          <button type="button" class="visual-btn-ghost" id="visual-retake-btn">Пройти заново</button>
-          <button type="button" class="visual-btn-ghost" id="visual-close-result-btn">Закрыть</button>
+          <button type="button" class="visual-btn-ghost" id="visual-retake-btn">${escapeHtml(T('test.retake', 'Пройти заново'))}</button>
+          <button type="button" class="visual-btn-ghost" id="visual-close-result-btn">${escapeHtml(T('common.close', 'Закрыть'))}</button>
         </div>
       `;
       container.querySelector('#visual-get-recs-btn')?.addEventListener('click', () => {
@@ -349,7 +356,7 @@
         renderStep();
         loadRecommendations();
       });
-      container.querySelector('#visual-save-btn')?.addEventListener('click', () => toast('Результат уже сохранён', 'success'));
+      container.querySelector('#visual-save-btn')?.addEventListener('click', () => toast(T('test.alreadySaved', 'Результат уже сохранён'), 'success'));
       const visualLogin = () => (window.requireLogin ? window.requireLogin() : (window.location.href = '/'));
       container.querySelector('#visual-login-link')?.addEventListener('click', visualLogin);
       container.querySelector('#visual-login-save-btn')?.addEventListener('click', visualLogin);
@@ -363,13 +370,13 @@
 
     if (state.step === 'saved-notice') {
       container.innerHTML = `
-        <p class="visual-eyebrow">Готово</p>
-        <h2 id="visual-step-title" class="visual-title">Новый результат сохранён</h2>
-        <p class="visual-lead">Вы можете посмотреть историю изменений в профиле.</p>
+        <p class="visual-eyebrow">${escapeHtml(T('test.done', 'Готово'))}</p>
+        <h2 id="visual-step-title" class="visual-title">${escapeHtml(T('test.savedTitle', 'Новый результат сохранён'))}</h2>
+        <p class="visual-lead">${escapeHtml(T('test.savedLead', 'Вы можете посмотреть историю изменений в профиле.'))}</p>
         <div class="visual-actions">
-          <button type="button" class="btn-primary" id="visual-open-profile-btn">Открыть профиль</button>
-          <button type="button" class="btn-primary" id="visual-saved-recs-btn">Получить рекомендации</button>
-          <button type="button" class="visual-btn-ghost" id="visual-saved-close-btn">Закрыть</button>
+          <button type="button" class="btn-primary" id="visual-open-profile-btn">${escapeHtml(T('test.openProfile', 'Открыть профиль'))}</button>
+          <button type="button" class="btn-primary" id="visual-saved-recs-btn">${escapeHtml(T('test.getRecs', 'Получить рекомендации'))}</button>
+          <button type="button" class="visual-btn-ghost" id="visual-saved-close-btn">${escapeHtml(T('common.close', 'Закрыть'))}</button>
         </div>
       `;
       container.querySelector('#visual-open-profile-btn')?.addEventListener('click', () => {
@@ -391,16 +398,16 @@
 
     if (state.step === 'recommendations') {
       const basedOnLabel = state.basedOn?.completedAt
-        ? `Рекомендации на основе результата от ${formatDate(state.basedOn.completedAt)}, ${formatTime(state.basedOn.completedAt)}`
-        : 'Рекомендации по вашему визуальному профилю';
+        ? T('test.recsBasedOn', `Рекомендации на основе результата от ${formatDate(state.basedOn.completedAt)}, ${formatTime(state.basedOn.completedAt)}`, { date: formatDate(state.basedOn.completedAt), time: formatTime(state.basedOn.completedAt) })
+        : T('test.recsTitle', 'Рекомендации по вашему визуальному профилю');
       container.innerHTML = `
-        <h2 id="visual-step-title" class="visual-title">Рекомендации по вашему визуальному профилю</h2>
+        <h2 id="visual-step-title" class="visual-title">${escapeHtml(T('test.recsTitle', 'Рекомендации по вашему визуальному профилю'))}</h2>
         <p class="visual-lead visual-recs-based-on">${escapeHtml(basedOnLabel)}</p>
-        <p class="visual-lead">Мы учли, как вы воспринимаете образы, атмосферу, темп, настроение и визуальный стиль.</p>
-          <div id="visual-recs-list" class="visual-recs-list">${window.LoadingUI.aiRecommendations('Подбираю рекомендации...', 4)}</div>
+        <p class="visual-lead">${escapeHtml(T('test.recsLead', 'Мы учли, как вы воспринимаете образы, атмосферу, темп, настроение и визуальный стиль.'))}</p>
+          <div id="visual-recs-list" class="visual-recs-list">${window.LoadingUI.aiRecommendations(T('test.pickingRecs', 'Подбираю рекомендации...'), 4)}</div>
         <div class="visual-actions">
-          <button type="button" class="visual-btn-ghost" id="visual-recs-back-btn">Назад к результату</button>
-          <button type="button" class="visual-btn-ghost" id="visual-recs-refresh-btn">Обновить</button>
+          <button type="button" class="visual-btn-ghost" id="visual-recs-back-btn">${escapeHtml(T('test.recsBack', 'Назад к результату'))}</button>
+          <button type="button" class="visual-btn-ghost" id="visual-recs-refresh-btn">${escapeHtml(T('common.refresh', 'Обновить'))}</button>
         </div>
       `;
       container.querySelector('#visual-recs-back-btn')?.addEventListener('click', () => {
@@ -424,7 +431,7 @@
     state.lastAnswers = answers;
 
     const container = ensureOverlay().querySelector('#visual-step-content');
-    if (container) container.innerHTML = '<div class="visual-loading">' + window.LoadingUI.ai('Формируем ваш визуальный профиль...', { panel: true, tag: false }) + '</div>';
+    if (container) container.innerHTML = '<div class="visual-loading">' + window.LoadingUI.ai(T('test.buildingProfile', 'Формируем ваш визуальный профиль...'), { panel: true, tag: false }) + '</div>';
 
     try {
       const res = await fetch('/api/visual-test', {
@@ -450,12 +457,12 @@
       renderHomeBlock();
       window.refreshProfilePage?.();
       if (state.guestResult) {
-        toast('Результат не сохранён — войдите, чтобы хранить историю', 'info');
+        toast(T('test.guestNotSaved', 'Результат не сохранён — войдите, чтобы хранить историю'), 'info');
       } else {
-        toast(state.isRetake ? 'Новый результат сохранён' : 'Визуальный профиль сохранён', 'success');
+        toast(state.isRetake ? T('test.newSaved', 'Новый результат сохранён') : T('test.profileSaved', 'Визуальный профиль сохранён'), 'success');
       }
     } catch (err) {
-      toast(err.message || 'Ошибка сохранения', 'error');
+      toast(err.message || T('test.saveFailed', 'Ошибка сохранения'), 'error');
       state.step = 'question';
       state.currentIndex = state.questions.length - 1;
       renderStep();
@@ -466,7 +473,7 @@
     const card = document.createElement('article');
     card.className = 'visual-rec-card';
     card.style.animationDelay = `${index * 80}ms`;
-    const typeLabel = item.type === 'series' || item.mediaType === 'tv' ? 'Сериал' : 'Фильм';
+    const typeLabel = item.type === 'series' || item.mediaType === 'tv' ? T('common.series', 'Сериал') : T('common.film', 'Фильм');
     const posterUrl = window.MovieDisplay?.posterUrl?.(item.poster) || item.poster;
     const inList = isInList(item.title);
 
@@ -479,14 +486,14 @@
           <h3>${escapeHtml(item.title)}</h3>
           <span class="visual-rec-meta">${escapeHtml(item.year || '')} · ${typeLabel}</span>
         </div>
-        ${item.genres?.length ? `<p class="visual-rec-genres">${item.genres.map(escapeHtml).join(' · ')}</p>` : ''}
+        ${item.genres?.length ? `<p class="visual-rec-genres">${(window.MovieDisplay?.displayGenres(item) || item.genres).map(escapeHtml).join(' · ')}</p>` : ''}
         <p class="visual-rec-reason">${escapeHtml(item.reason || '')}</p>
         ${item.visualConnection ? `<p class="visual-rec-connection">${escapeHtml(item.visualConnection)}</p>` : ''}
-        ${item.visualMood ? `<p class="visual-rec-mood">Настроение: ${escapeHtml(item.visualMood)} · ${escapeHtml(item.pace || '')}</p>` : ''}
+        ${item.visualMood ? `<p class="visual-rec-mood">${escapeHtml(T('test.mood', 'Настроение'))}: ${escapeHtml(item.visualMood)} · ${escapeHtml(item.pace || '')}</p>` : ''}
         <div class="visual-rec-actions">
-          <button type="button" class="rec-add-btn"${inList ? ' disabled' : ''} title="Добавить">${inList ? '✓' : '+'}</button>
+          <button type="button" class="rec-add-btn"${inList ? ' disabled' : ''} title="${escapeHtml(T('common.add', 'Добавить'))}">${inList ? '✓' : '+'}</button>
           <div class="visual-dislike-wrap">
-            <button type="button" class="visual-dislike-btn">Не хочу такое</button>
+            <button type="button" class="visual-dislike-btn">${escapeHtml(T('test.dislike', 'Не хочу такое'))}</button>
             <div class="visual-dislike-menu hidden"></div>
           </div>
         </div>
@@ -500,7 +507,7 @@
         type: 'add_movie', title: item.title, status: 'want', mediaType, tmdbId: item.tmdbId || undefined
       }]);
       if (results?.[0]?.success) { this.textContent = '✓'; this.disabled = true; }
-      else toast(results?.[0]?.error || 'Не удалось добавить', 'error');
+      else toast(results?.[0]?.error || T('test.addFailed', 'Не удалось добавить'), 'error');
     });
 
     const menuBtn = card.querySelector('.visual-dislike-btn');
@@ -526,9 +533,9 @@
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
             card.classList.add('visual-rec-card--dismissed');
-            toast('Учтём в следующих рекомендациях', 'success');
+            toast(T('test.feedbackSaved', 'Учтём в следующих рекомендациях'), 'success');
           } catch (err) {
-            toast(err.message || 'Не удалось сохранить', 'error');
+            toast(err.message || T('test.saveFailed', 'Ошибка сохранения'), 'error');
           }
         });
       });
@@ -540,7 +547,7 @@
   async function loadRecommendations() {
     const listEl = document.getElementById('visual-recs-list');
     if (!listEl) return;
-    listEl.innerHTML = window.LoadingUI.aiRecommendations('Подбираю рекомендации...', 4);
+    listEl.innerHTML = window.LoadingUI.aiRecommendations(T('test.pickingRecs', 'Подбираю рекомендации...'), 4);
     state.basedOn = null;
 
     try {
@@ -558,7 +565,7 @@
       const data = await res.json();
 
       if (!res.ok) {
-        listEl.innerHTML = `<p class="visual-recs-error">${escapeHtml(data.error || 'Не удалось загрузить рекомендации')}</p>`;
+        listEl.innerHTML = `<p class="visual-recs-error">${escapeHtml(data.error || T('test.recsLoadError', 'Не удалось загрузить рекомендации'))}</p>`;
         return;
       }
 
@@ -570,21 +577,21 @@
 
       const recs = data.recommendations || [];
       if (!recs.length) {
-        listEl.innerHTML = '<p class="visual-recs-error">Пока нет подходящих рекомендаций. Попробуйте обновить позже.</p>';
+        listEl.innerHTML = `<p class="visual-recs-error">${escapeHtml(T('test.recsEmpty', 'Пока нет подходящих рекомендаций. Попробуйте обновить позже.'))}</p>`;
         return;
       }
 
       listEl.innerHTML = '';
       recs.forEach((item, i) => listEl.appendChild(renderRecommendationCard(item, i)));
     } catch {
-      listEl.innerHTML = '<p class="visual-recs-error">Сервер недоступен. Проверьте подключение.</p>';
+      listEl.innerHTML = `<p class="visual-recs-error">${escapeHtml(T('profile.serverDown', 'Сервер недоступен'))}</p>`;
     }
   }
 
   async function refresh() {
     const block = document.getElementById('visual-test-section');
     if (block) {
-      block.innerHTML = '<div class="visual-home-card">' + window.LoadingUI.ai('Загрузка теста...', { panel: true, compact: true, tag: false }) + '</div>';
+      block.innerHTML = '<div class="visual-home-card">' + window.LoadingUI.ai(T('test.loadingTest', 'Загрузка теста...'), { panel: true, compact: true, tag: false }) + '</div>';
     }
     try {
       const res = await fetch('/api/visual-test', { headers: window.authHeaders() });

@@ -10,7 +10,7 @@
   async function loadTasteAnalysis() {
     if (!tasteContent) return;
 
-    tasteContent.innerHTML = window.LoadingUI.ai('Анализирую ваш вкус...', { tag: 'p', wrapClass: '' });
+    tasteContent.innerHTML = window.LoadingUI.ai(window.t ? window.t('account.analyzingTaste') : 'Анализирую ваш вкус...', { tag: 'p', wrapClass: '' });
     if (tasteStatus) tasteStatus.textContent = '';
 
     try {

@@ -1,14 +1,8 @@
 /* ===================================================================
-   homeCollections.js — подборки на главной в виде компактных «чипов».
+   homeCollections.js — блок «Готовые подборки» на главной.
 
-   Идея: вместо тяжёлых горизонтальных лент показываем подборки строкой
-   чипов (иконка + название + описание) — точно как в каталоге
-   (.cat-chips / .cat-chip). По клику чип разворачивает ленту фильмов в
-   панель снизу. Карточки и добавление в список переиспользуются из
-   каталога (window.CatalogUI), поведение единое.
-
-   Лента подборки грузится через /api/catalog/collection/:id только по
-   клику на чип — никаких десятков фоновых запросов при показе главной.
+   Компактная витрина: один ряд из 5–7 актуальных подборок + кнопка
+   «Открыть каталог». Конфиг — readyCollections.js через /api/catalog/home.
    =================================================================== */
 (function () {
   'use strict';
@@ -30,12 +24,16 @@
       : String(text == null ? '' : text);
   }
 
+  function tt(key, fallback) {
+    return (window.t ? window.t(key) : null) || fallback;
+  }
+
   function hdrs() {
     return (typeof window.authHeaders === 'function') ? window.authHeaders() : {};
   }
 
   function lang() {
-    return (window.I18N && window.I18N.tmdbLang) ? window.I18N.tmdbLang() : 'ru';
+    return (window.I18N && window.I18N.getLang) ? window.I18N.getLang() : 'ru';
   }
 
   function withLang(url) {
@@ -54,20 +52,26 @@
     return cards;
   }
 
-  // Чипы подборок в строку + общая панель для развёрнутой ленты.
-  function renderChips(rails) {
-    listEl.innerHTML = '' +
-      '<div class="cat-chips" role="tablist" aria-label="Подборки">' +
-        rails.map(function (r) {
-          return '<button type="button" class="cat-chip" data-collection="' + esc(r.id) + '" aria-expanded="false">' +
-            '<span class="cat-chip-icon" aria-hidden="true">' + iconSvg(r.icon) + '</span>' +
-            '<span class="cat-chip-info">' +
-              '<span class="cat-chip-text">' + esc(r.title) + '</span>' +
-              (r.desc ? '<span class="cat-chip-desc">' + esc(r.desc) + '</span>' : '') +
-            '</span>' +
-            '<span class="cat-chip-caret" aria-hidden="true">▾</span>' +
-          '</button>';
-        }).join('') +
+  function renderChip(c) {
+    return '<button type="button" class="cat-chip" data-collection="' + esc(c.id) + '" aria-expanded="false">' +
+      '<span class="cat-chip-icon" aria-hidden="true">' + iconSvg(c.icon) + '</span>' +
+      '<span class="cat-chip-info">' +
+        '<span class="cat-chip-text">' + esc(c.shortTitle || c.title) + '</span>' +
+        (c.desc ? '<span class="cat-chip-desc">' + esc(c.desc) + '</span>' : '') +
+      '</span>' +
+      '<span class="cat-chip-caret" aria-hidden="true">▾</span>' +
+    '</button>';
+  }
+
+  function renderHomeRow(collections) {
+    listEl.innerHTML =
+      '<div class="home-collections-row">' +
+        '<div class="cat-chips home-collections-chips" role="tablist" aria-label="' + esc(tt('home.collectionsTitle', 'Готовые подборки')) + '">' +
+          collections.map(renderChip).join('') +
+        '</div>' +
+        '<button type="button" class="home-catalog-cta home-catalog-cta--inline" data-open-catalog="1">' +
+          esc(tt('home.openCatalog', 'Открыть каталог')) +
+        '</button>' +
       '</div>' +
       '<div id="home-chip-panel" class="cat-chip-panel" hidden></div>';
   }
@@ -90,20 +94,27 @@
       .then(function (out) {
         var items = (out.ok && out.d && out.d.items) ? out.d.items : [];
         if (!items.length) {
-          target.innerHTML = '<p class="cat-row-empty">Не удалось загрузить</p>';
+          target.innerHTML = '<p class="cat-row-empty">' + esc(tt('card.loadFailed', 'Не удалось загрузить')) + '</p>';
           return;
         }
         collCache[id] = items;
         if (window.CatalogUI && window.CatalogUI.renderCardsInto) window.CatalogUI.renderCardsInto(target, items);
       })
       .catch(function () {
-        target.innerHTML = '<p class="cat-row-empty">Сервер недоступен</p>';
+        target.innerHTML = '<p class="cat-row-empty">' + esc(tt('card.serverDown', 'Сервер недоступен')) + '</p>';
       });
   }
 
-  // Делегированные клики: чип открывает/закрывает свою ленту,
-  // «+ В список» добавляет фильм (через общий хелпер каталога).
   listEl.addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('[data-open-catalog]')) {
+      if (window.appShell && typeof window.appShell.show === 'function') {
+        window.appShell.show('catalog');
+      } else {
+        window.location.hash = '#catalog';
+      }
+      return;
+    }
+
     var chip = e.target.closest && e.target.closest('.cat-chip');
     if (chip) {
       var id = chip.getAttribute('data-collection');
@@ -123,6 +134,7 @@
       chip.classList.add('cat-chip--active');
       chip.setAttribute('aria-expanded', 'true');
       openCollection(id);
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       return;
     }
 
@@ -133,8 +145,6 @@
     }
   });
 
-  // Смена языка: названия/описания подборок и фильмы (TMDB) зависят от
-  // языка, поэтому пересобираем чипы заново.
   document.addEventListener('i18n:change', function () {
     built = false;
     loadingIndex = false;
@@ -152,14 +162,14 @@
       .then(function (data) {
         loadingIndex = false;
         built = true;
-        var rails = (data && data.rails) || [];
-        if (!rails.length) { root.style.display = 'none'; return; }
-        renderChips(rails);
+        var collections = (data && data.collections) || (data && data.sections && data.sections[0] && data.sections[0].collections) || [];
+        if (!collections.length) { root.style.display = 'none'; return; }
+        renderHomeRow(collections);
       })
       .catch(function () {
         loadingIndex = false;
-        listEl.innerHTML = '<p class="cat-row-empty">Не удалось загрузить подборки. ' +
-          '<button type="button" class="cat-card-add" data-home-retry="1">Повторить</button></p>';
+        listEl.innerHTML = '<p class="cat-row-empty">' + esc(tt('catalog.collectionsError', 'Не удалось загрузить подборки.')) +
+          ' <button type="button" class="cat-card-add" data-home-retry="1">' + esc(tt('common.retry', 'Повторить')) + '</button></p>';
       });
   }
 

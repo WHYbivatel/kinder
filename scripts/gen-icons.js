@@ -1,48 +1,137 @@
-import sharp from 'sharp';
+import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const iconsDir = path.join(__dirname, '..', 'icons');
+const sourcePath = path.join(iconsDir, 'logo-source.png');
+const THEME_BG = { r: 8, g: 8, b: 10, alpha: 1 };
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs>
-    <radialGradient id="glow" cx="50%" cy="38%" r="70%">
-      <stop offset="0%" stop-color="#f97373"/>
-      <stop offset="48%" stop-color="#e50914"/>
-      <stop offset="100%" stop-color="#7f0910"/>
-    </radialGradient>
-    <linearGradient id="card" x1="0%" x2="100%" y1="0%" y2="100%">
-      <stop offset="0%" stop-color="#25252d"/>
-      <stop offset="100%" stop-color="#101014"/>
-    </linearGradient>
-  </defs>
-  <rect width="512" height="512" rx="118" fill="#08080a"/>
-  <circle cx="256" cy="256" r="188" fill="url(#glow)" opacity="0.22"/>
-  <rect x="116" y="118" width="280" height="276" rx="44" fill="url(#card)" stroke="rgba(255,255,255,0.16)" stroke-width="10"/>
-  <path fill="#e50914" d="M156 160h200v52H156z"/>
-  <path fill="#ffffff" fill-opacity="0.94" d="M206 239v96l86-48-86-48z"/>
-  <path fill="#f5f5f7" fill-opacity="0.74" d="M156 351h200v22H156z"/>
-  <path fill="#f5f5f7" fill-opacity="0.28" d="M156 225h44v28h-44zm156 0h44v28h-44zM156 286h44v28h-44zm156 0h44v28h-44z"/>
-</svg>`;
+if (!fs.existsSync(sourcePath)) {
+  console.error('Missing icons/logo-source.png — положите исходник логотипа в эту папку.');
+  process.exit(1);
+}
 
-const buffer = Buffer.from(svg);
+function isBgPixel(r, g, b) {
+  const avg = (r + g + b) / 3;
+  const spread = Math.max(r, g, b) - Math.min(r, g, b);
+  if (r > 235 && g > 235 && b > 235) return true;
+  return avg > 185 && spread < 28;
+}
 
-const targets = [
+function isColorfulPixel(r, g, b) {
+  return Math.max(r, g, b) - Math.min(r, g, b) > 34;
+}
+
+/** Убирает шахматный/белый фон; белая «K» и серые точки остаются (смежны с тёмной зоной). */
+function removeLogoBackground(data, width, height, channels) {
+  const out = Buffer.from(data);
+  const keep = new Uint8Array(width * height);
+
+  for (let idx = 0; idx < width * height; idx += 1) {
+    const i = idx * channels;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    if (!isBgPixel(r, g, b)) {
+      keep[idx] = 1;
+      continue;
+    }
+
+    const x = idx % width;
+    const y = (idx - x) / width;
+    const neighbors = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]];
+    for (const [nx, ny] of neighbors) {
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      const j = (ny * width + nx) * channels;
+      const nr = data[j];
+      const ng = data[j + 1];
+      const nb = data[j + 2];
+      if (!isBgPixel(nr, ng, nb) && !isColorfulPixel(nr, ng, nb)) {
+        keep[idx] = 1;
+        break;
+      }
+    }
+  }
+
+  for (let idx = 0; idx < width * height; idx += 1) {
+    if (keep[idx]) continue;
+    const i = idx * channels;
+    out[i] = 0;
+    out[i + 1] = 0;
+    out[i + 2] = 0;
+    if (channels === 4) out[i + 3] = 0;
+  }
+
+  return out;
+}
+
+async function loadLogoRgba() {
+  const { data, info } = await sharp(sourcePath)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const cleaned = removeLogoBackground(data, info.width, info.height, info.channels);
+  return sharp(cleaned, {
+    raw: { width: info.width, height: info.height, channels: info.channels }
+  }).png().toBuffer();
+}
+
+const uiTargets = [
+  { file: 'brand-mark.png', size: 56 },
+  { file: 'favicon-32.png', size: 32 },
+  { file: 'favicon-16.png', size: 16 }
+];
+
+const appTargets = [
   { file: 'icon-192.png', size: 192 },
   { file: 'icon-512.png', size: 512 },
-  { file: 'maskable-512.png', size: 512 },
   { file: 'apple-touch-icon-180.png', size: 180 }
 ];
 
+async function saveTransparentPng(logoBuffer, size, file) {
+  await sharp(logoBuffer)
+    .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toFile(path.join(iconsDir, file));
+  console.log(`generated ${file}`);
+}
+
+async function saveOnThemeBg(logoBuffer, size, file, padRatio = 0) {
+  const pad = Math.round(size * padRatio);
+  const inner = size - pad * 2;
+  const resized = await sharp(logoBuffer)
+    .resize(inner, inner, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer();
+
+  await sharp({
+    create: {
+      width: size,
+      height: size,
+      channels: 4,
+      background: THEME_BG
+    }
+  })
+    .composite([{ input: resized, gravity: 'center' }])
+    .png()
+    .toFile(path.join(iconsDir, file));
+  console.log(`generated ${file}`);
+}
+
 async function run() {
-  for (const target of targets) {
-    await sharp(buffer, { density: 384 })
-      .resize(target.size, target.size, { fit: 'cover' })
-      .png()
-      .toFile(path.join(iconsDir, target.file));
-    console.log(`generated ${target.file}`);
+  const logoBuffer = await loadLogoRgba();
+  await fs.promises.writeFile(path.join(iconsDir, 'logo-clean.png'), logoBuffer);
+
+  for (const target of uiTargets) {
+    await saveTransparentPng(logoBuffer, target.size, target.file);
   }
+  for (const target of appTargets) {
+    await saveOnThemeBg(logoBuffer, target.size, target.file);
+  }
+  await saveOnThemeBg(logoBuffer, 512, 'maskable-512.png', 0.12);
 }
 
 run().catch((error) => {

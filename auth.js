@@ -1,21 +1,15 @@
 const loginOverlay = document.getElementById('login-overlay');
 const appContent = document.getElementById('app-content');
-const authPhoneForm = document.getElementById('auth-phone-form');
-const authPhone = document.getElementById('auth-phone');
-const authCodeForm = document.getElementById('auth-code-form');
-const authCode = document.getElementById('auth-code');
-const authCodeBackBtn = document.getElementById('auth-code-back');
-const authCodeHint = document.getElementById('auth-code-hint');
-const authHintDefault = document.getElementById('auth-hint-default');
-const authPhoneDisplay = document.getElementById('auth-phone-display');
+const authForm = document.getElementById('auth-form');
+const authLogin = document.getElementById('auth-login');
+const authPassword = document.getElementById('auth-password');
+const authSubmitBtn = document.getElementById('auth-submit-btn');
+const authModeToggle = document.getElementById('auth-mode-toggle');
 const authError = document.getElementById('auth-error');
 const authGuestBtn = document.getElementById('auth-guest-btn');
 
-// Телефон, на который запросили код (между шагом 1 и шагом 2).
-let pendingPhone = '';
+let authMode = 'login';
 
-// Постоянный идентификатор устройства: по нему PWA «помнит» пользователя
-// и пускает без ввода пароля. Хранится в localStorage (переживает перезапуск).
 function getDeviceId() {
   let id = localStorage.getItem('mf_device_id');
   if (!id) {
@@ -36,7 +30,9 @@ function getToken() {
 
 function authHeaders() {
   const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  if (window.I18N?.apiHeaders) Object.assign(headers, window.I18N.apiHeaders());
+  return headers;
 }
 
 window.authHeaders = authHeaders;
@@ -46,17 +42,18 @@ function isLoggedIn() {
 }
 window.isLoggedIn = isLoggedIn;
 
-// Глобальная точка для гостевых действий: открыть окно входа с подсказкой.
 window.requireLogin = function requireLogin(message) {
-  openLoginModal(message || 'Войдите, чтобы пользоваться этой функцией.');
+  const fallback = window.t ? window.t('notify.loginRequiredGeneric') : 'Войдите, чтобы пользоваться этой функцией.';
+  openLoginModal(message || fallback);
   return false;
 };
 
 function getConnectionErrorMessage() {
+  const T = (k, f) => (window.t ? window.t(k) : f);
   if (window.location.protocol === 'file:') {
-    return 'Вы открыли файл напрямую. Запустите сервер и откройте http://localhost:3000';
+    return T('errors.fileProtocol', 'Вы открыли файл напрямую. Запустите сервер и откройте http://localhost:3000');
   }
-  return 'Не удалось связаться с сервером. Проверьте, что в cmd запущен: node server.js';
+  return T('errors.serverDown', 'Не удалось связаться с сервером. Проверьте, что в cmd запущен: node server.js');
 }
 
 function showFileProtocolWarning() {
@@ -65,12 +62,10 @@ function showFileProtocolWarning() {
   const warning = document.getElementById('open-via-server-hint');
   if (warning) {
     warning.classList.remove('hidden');
-    warning.textContent = 'Откройте сайт через http://localhost:3000 (не двойным кликом по index.html)';
+    warning.textContent = window.t ? window.t('errors.openViaServer') : 'Откройте сайт через http://localhost:3000 (не двойным кликом по index.html)';
   }
 }
 
-// Окно входа теперь модальное: приложение остаётся видимым под ним,
-// чтобы гость мог закрыть его и продолжить без входа.
 function openLoginModal(message = '') {
   loginOverlay.classList.remove('hidden');
   if (message && authError) {
@@ -83,35 +78,11 @@ function closeLoginModal() {
   if (authError) authError.textContent = '';
 }
 
-// Показать шаг ввода телефона (по умолчанию) / шаг ввода кода.
-function showPhoneStep() {
-  authPhoneForm?.classList.remove('hidden');
-  authCodeForm?.classList.add('hidden');
-  authCodeHint?.classList.add('hidden');
-  authHintDefault?.classList.remove('hidden');
-  if (authError) authError.textContent = '';
-}
-
-function showCodeStep(phone) {
-  authPhoneForm?.classList.add('hidden');
-  authCodeForm?.classList.remove('hidden');
-  authHintDefault?.classList.add('hidden');
-  authCodeHint?.classList.remove('hidden');
-  if (authPhoneDisplay) authPhoneDisplay.textContent = phone || '';
-  if (authError) authError.textContent = '';
-  if (authCode) { authCode.value = ''; setTimeout(() => authCode.focus(), 50); }
-}
-
-// Сброс формы входа в исходное состояние.
 function resetAuthForm() {
-  authPhoneForm?.reset();
-  authCodeForm?.reset();
-  pendingPhone = '';
-  showPhoneStep();
+  authForm?.reset();
   if (authError) authError.textContent = '';
 }
 
-// Дружелюбное имя: телефон показываем как есть, email — часть до @.
 function displayNameFrom(username) {
   if (!username) return '';
   const value = String(username);
@@ -121,7 +92,6 @@ function displayNameFrom(username) {
 }
 window.displayNameFrom = displayNameFrom;
 
-// Применяем визуальное состояние авторизации (гость / вошедший).
 function applyAuthState(username) {
   const authed = Boolean(username);
   document.body.dataset.auth = authed ? 'user' : 'guest';
@@ -139,6 +109,29 @@ function applyAuthState(username) {
   if (avatar) avatar.hidden = !authed;
 }
 
+function updateAuthModeUI() {
+  const isRegister = authMode === 'register';
+  if (authPassword) {
+    authPassword.autocomplete = isRegister ? 'new-password' : 'current-password';
+  }
+  if (authSubmitBtn) {
+    authSubmitBtn.textContent = window.t
+      ? window.t(isRegister ? 'auth.submitRegister' : 'auth.submitLogin')
+      : (isRegister ? 'Зарегистрироваться' : 'Войти');
+  }
+  if (authModeToggle) {
+    authModeToggle.textContent = window.t
+      ? window.t(isRegister ? 'auth.switchToLogin' : 'auth.switchToRegister')
+      : (isRegister ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться');
+  }
+}
+
+function setAuthMode(mode) {
+  authMode = mode === 'register' ? 'register' : 'login';
+  if (authError) authError.textContent = '';
+  updateAuthModeUI();
+}
+
 document.addEventListener('i18n:change', function () {
   const name = userGreeting && userGreeting.dataset.authName;
   if (userGreeting && name) {
@@ -146,6 +139,7 @@ document.addEventListener('i18n:change', function () {
       ? window.t('home.greeting', { name: displayNameFrom(name) })
       : `Привет, ${displayNameFrom(name)}`;
   }
+  updateAuthModeUI();
 });
 
 window.handleAuthExpired = function handleAuthExpired(message) {
@@ -164,14 +158,25 @@ function showApp(username) {
 
 if (loginCloseBtn) loginCloseBtn.addEventListener('click', closeLoginModal);
 if (guestLoginBtn) guestLoginBtn.addEventListener('click', () => openLoginModal());
+if (authModeToggle) {
+  authModeToggle.addEventListener('click', () => {
+    setAuthMode(authMode === 'login' ? 'register' : 'login');
+  });
+}
+
+const listGuestLoginBtn = document.getElementById('list-guest-login-btn');
+if (listGuestLoginBtn) {
+  listGuestLoginBtn.addEventListener('click', () => {
+    const msg = window.t ? window.t('list.guestLoginPrompt') : 'Войдите, чтобы пользоваться своим списком фильмов.';
+    openLoginModal(msg);
+  });
+}
 if (loginOverlay) {
   loginOverlay.addEventListener('click', (event) => {
     if (event.target === loginOverlay) closeLoginModal();
   });
 }
 
-// Кнопка «Продолжить как гость»: на главной просто закрывает окно входа,
-// на остальных страницах возвращает на главную.
 if (authGuestBtn) {
   authGuestBtn.addEventListener('click', () => {
     const page = document.body.dataset.page || 'home';
@@ -180,84 +185,57 @@ if (authGuestBtn) {
   });
 }
 
-// Вход по номеру телефона + SMS-код (без пароля). Шаг 1 — запрос кода.
-// Реальная отправка SMS пока не выполняется: используется временный код 1234.
-if (authPhoneForm) {
-  authPhoneForm.addEventListener('submit', async function (event) {
+if (authForm) {
+  authForm.addEventListener('submit', async function (event) {
     event.preventDefault();
     if (authError) authError.textContent = '';
 
-    const phone = authPhone.value.trim();
-    const submitBtn = authPhoneForm.querySelector('button[type="submit"]');
-    const originalLabel = submitBtn ? submitBtn.textContent : '';
-    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Отправляем…'; }
+    const username = authLogin.value.trim();
+    const password = authPassword.value;
+    const isRegister = authMode === 'register';
+    const endpoint = isRegister ? '/api/register' : '/api/login';
+    const originalLabel = authSubmitBtn ? authSubmitBtn.textContent : '';
 
-    try {
-      const response = await fetch('/api/auth/request-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone })
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        if (authError) authError.textContent = data.error || 'Не удалось отправить код';
-        return;
-      }
-
-      pendingPhone = data.phone || phone;
-      showCodeStep(pendingPhone);
-    } catch (error) {
-      if (authError) authError.textContent = getConnectionErrorMessage();
-    } finally {
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalLabel; }
+    if (authSubmitBtn) {
+      authSubmitBtn.disabled = true;
+      authSubmitBtn.textContent = window.t
+        ? window.t(isRegister ? 'auth.registering' : 'auth.loggingIn')
+        : (isRegister ? 'Регистрация…' : 'Входим…');
     }
-  });
-}
-
-// Шаг 2 — проверка кода и вход. Новый номер → аккаунт создаётся автоматически.
-if (authCodeForm) {
-  authCodeForm.addEventListener('submit', async function (event) {
-    event.preventDefault();
-    if (authError) authError.textContent = '';
-
-    const code = authCode.value.trim();
-    const submitBtn = authCodeForm.querySelector('button[type="submit"]');
-    const originalLabel = submitBtn ? submitBtn.textContent : '';
-    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Входим…'; }
 
     try {
-      const response = await fetch('/api/auth/verify-code', {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: pendingPhone, code, deviceId: getDeviceId() })
+        body: JSON.stringify({ username, password, deviceId: getDeviceId() })
       });
 
       const data = await response.json();
       if (!response.ok) {
-        if (authError) authError.textContent = data.error || 'Неверный код';
+        if (authError) {
+          if (response.status === 409) {
+            authError.textContent = window.t ? window.t('auth.loginTaken') : (data.error || 'Логин уже занят');
+          } else {
+            authError.textContent = data.error || (isRegister ? 'Не удалось зарегистрироваться' : 'Не удалось войти');
+          }
+        }
         return;
       }
 
       sessionStorage.setItem('token', data.token);
       sessionStorage.setItem('username', data.username);
       localStorage.removeItem('mf_logged_out');
-      // Переносим гостевые действия (свайпы, список, тесты) в аккаунт.
       await window.GuestStore?.merge?.();
+      await window.syncGuestSwipeActionsToAccount?.();
       await startApp(data.username);
     } catch (error) {
       if (authError) authError.textContent = getConnectionErrorMessage();
     } finally {
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalLabel; }
+      if (authSubmitBtn) {
+        authSubmitBtn.disabled = false;
+        authSubmitBtn.textContent = originalLabel;
+      }
     }
-  });
-}
-
-if (authCodeBackBtn) {
-  authCodeBackBtn.addEventListener('click', () => {
-    pendingPhone = '';
-    showPhoneStep();
-    setTimeout(() => authPhone?.focus(), 50);
   });
 }
 
@@ -273,8 +251,6 @@ async function handleLogout() {
 
   sessionStorage.removeItem('token');
   sessionStorage.removeItem('username');
-  // Помечаем, что пользователь вышел вручную — не входим автоматически по
-  // устройству, пока он снова не введёт имя (иначе выход не сработает).
   localStorage.setItem('mf_logged_out', '1');
   resetAuthForm();
 
@@ -282,7 +258,7 @@ async function handleLogout() {
     window.location.href = '/';
     return;
   }
-  showLoginScreen();
+  startGuest();
 }
 
 if (logoutBtn) {
@@ -309,14 +285,9 @@ async function startApp(username) {
   }
 }
 
-// Гостевой режим: главная открывается без входа. Доступны публичные
-// функции (премьеры, свайпы, тесты без сохранения). Личный список,
-// рекомендации «для вас», импорт и т.п. скрыты до входа (через CSS по
-// body[data-auth="guest"]).
 function startGuest() {
   const page = document.body.dataset.page || 'home';
 
-  // Аккаунт без входа смысла не имеет — отправляем на главную.
   if (page === 'account') {
     window.location.href = '/';
     return;
@@ -325,22 +296,17 @@ function startGuest() {
   showApp(null);
 
   if (page === 'home') {
-    // Загружаем локальный гостевой список в память: нужно для дедупликации
-    // свайпов и корректного переноса в аккаунт после входа.
     window.MovieApp?.init?.().catch?.(() => {});
-    window.refreshExtendedFeatures?.();   // премьеры — публичный эндпоинт
+    window.refreshExtendedFeatures?.();
     window.PsychTest?.refresh?.();
     window.VisualTest?.refresh?.();
     window.ShortVisualTest?.refresh?.();
-    window.DiscoverPWA?.refresh?.();      // свайпы — публичные рекомендации
+    window.DiscoverPWA?.refresh?.();
   } else if (page === 'battle') {
-    // Битва требует личного списка — предложим войти.
-    openLoginModal('Войдите, чтобы устроить битву из своих фильмов.');
+    openLoginModal(window.t ? window.t('battle.loginIntro') : 'Войдите, чтобы устроить битву из своих фильмов.');
   }
 }
 
-// Тихий вход по устройству: если это устройство уже привязано к аккаунту —
-// восстанавливаем сессию без ввода чего-либо.
 async function tryDeviceLogin() {
   if (localStorage.getItem('mf_logged_out') === '1') return false;
   try {
@@ -353,8 +319,8 @@ async function tryDeviceLogin() {
     const data = await response.json();
     sessionStorage.setItem('token', data.token);
     sessionStorage.setItem('username', data.username);
-    // Если до тихого входа были гостевые действия — переносим их в аккаунт.
     await window.GuestStore?.merge?.();
+    await window.syncGuestSwipeActionsToAccount?.();
     await startApp(data.username);
     return true;
   } catch (error) {
@@ -380,10 +346,10 @@ async function tryAutoLogin() {
     }
   }
 
-  // Нет активной сессии — пробуем тихо войти по устройству.
   if (await tryDeviceLogin()) return;
   startGuest();
 }
 
+updateAuthModeUI();
 tryAutoLogin();
 showFileProtocolWarning();

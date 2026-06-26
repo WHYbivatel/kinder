@@ -84,7 +84,7 @@ async function fetchHtml(url, headers = {}) {
 
 // ── Парсинг одной строки таблицы результатов Rutor ──
 function parseRutorRow(row) {
-  const magnet = row.match(/href=["'](magnet:\?[^"']+)["']/i)?.[1] || null;
+  const magnet = decodeEntities(row.match(/href=["'](magnet:\?[^"']+)["']/i)?.[1] || '') || null;
 
   // Прямая ссылка на .torrent: //d.rutor.info/download/<id> либо /download/<id>.
   const rawDownload = row.match(/href=["']([^"']*\/download\/[^"']+)["']/i)?.[1] || null;
@@ -108,6 +108,60 @@ function parseRutorRow(row) {
   return { title, size, seeds, leechs, magnet, torrentUrl };
 }
 
+// Разбор технической части названия раздачи Rutor.
+function parseTorrentMeta(title) {
+  const raw = String(title || '').trim();
+  let cleanTitle = raw;
+  let year = null;
+  let quality = null;
+  let format = null;
+  let audio = null;
+  let subtitles = null;
+
+  const yearMatch = raw.match(/\((\d{4})\)/);
+  if (yearMatch) year = yearMatch[1];
+
+  const qualityMatch = raw.match(/\b(2160p|1080p|720p|480p|360p|4K)\b/i);
+  if (qualityMatch) quality = qualityMatch[1].toUpperCase().replace('4K', '2160p');
+
+  const formatMatch = raw.match(/\b(WEB-DL|WEBRip|BDRip|HDRip|HDTV|BluRay|BDRemux|REMUX|WEB-DLRip|DVDRip)\b/i);
+  if (formatMatch) format = formatMatch[1].toUpperCase();
+
+  const audioPatterns = [
+    /\b(Многоголосый(?:\s+закадровый)?|Дубляж|Любительский|Оригинал(?:\s*\(\+субтитры\))?|NewStudio|LostFilm|AlexFilm|Gears Media|Jaskier|HDRezka Studio|Синема УС|BaibaKo|Anilibria|AniDUB|AniFilm)\b/gi,
+    /\b(MVO|DVO|VO|DUB)\b/gi,
+    /\|\s*D\b/gi
+  ];
+  const audioHits = new Set();
+  for (const re of audioPatterns) {
+    let m;
+    const r = new RegExp(re.source, re.flags);
+    while ((m = r.exec(raw)) !== null) {
+      const val = (m[1] || 'Дубляж').trim();
+      if (val !== 'D') audioHits.add(val);
+    }
+  }
+  if (audioHits.size) audio = [...audioHits].join(', ');
+
+  if (/\b(субтитр|subtitle|sub)\b/i.test(raw) || /\+субтитры/i.test(raw)) {
+    subtitles = true;
+  }
+
+  const techIdx = raw.search(/\b(WEB-DL|WEBRip|BDRip|HDRip|1080p|720p|2160p|480p)\b/i);
+  if (techIdx > 10) {
+    cleanTitle = raw.slice(0, techIdx).replace(/\(\d{4}\)\s*$/, '').trim();
+  }
+  cleanTitle = cleanTitle.replace(/\s*\/\s*/g, ' / ').replace(/\s+/g, ' ').trim();
+  if (!cleanTitle) cleanTitle = raw;
+
+  return { raw, cleanTitle, year, quality, format, audio, subtitles };
+}
+
+function enrichTorrent(item) {
+  const meta = parseTorrentMeta(item.title);
+  return { ...item, meta };
+}
+
 function parseRutorResults(html) {
   if (!html) return [];
   const results = [];
@@ -115,7 +169,7 @@ function parseRutorResults(html) {
   const rows = html.match(/<tr class=["'](?:gai|tum)["'][\s\S]*?<\/tr>/gi) || [];
   for (const row of rows) {
     const parsed = parseRutorRow(row);
-    if (parsed) results.push(parsed);
+    if (parsed) results.push(enrichTorrent(parsed));
     if (results.length >= MAX_RESULTS) break;
   }
   return results;
@@ -146,14 +200,14 @@ function parseRutrackerResults(html) {
     const seeds = Number(row.match(/class=["'][^"']*seedmed[^"']*["'][^>]*>\D*(\d+)/i)?.[1] || 0);
     const leechs = Number(row.match(/class=["']leechmed["'][^>]*>\D*(\d+)/i)?.[1] || 0);
 
-    results.push({
+    results.push(enrichTorrent({
       title,
       size: sizeMatch ? `${sizeMatch[1].replace(',', '.')} ${sizeMatch[2]}` : null,
       seeds,
       leechs,
       magnet: null,
       torrentUrl: `${RUTRACKER_BASE}/forum/dl.php?t=${topicId}`
-    });
+    }));
     if (results.length >= MAX_RESULTS) break;
   }
   return results;
@@ -192,7 +246,7 @@ export async function searchTorrents(query, type = 'movie') {
   }
 
   results.sort((a, b) => (b.seeds || 0) - (a.seeds || 0));
-  cacheSet(cacheKey, results);
+  if (results.length) cacheSet(cacheKey, results);
   return results;
 }
 

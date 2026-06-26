@@ -7,6 +7,18 @@ let moviesRevision = 0;
 let saveChain = Promise.resolve();
 let activeFilters = { status: '', genre: '', tag: '', mediaType: 'movie', search: '', release: 'all', sort: 'added' };
 
+function isAnimatedListItem(movie) {
+  return window.MediaCategories?.isAnimatedContent?.(movie) ?? false;
+}
+
+function movieMatchesMediaTab(movie, tabType = activeFilters.mediaType) {
+  return window.MediaCategories?.matchesListCategory?.(movie, tabType) ?? true;
+}
+
+function countMoviesInMediaTab(tabType) {
+  return movies.filter((m) => movieMatchesMediaTab(m, tabType)).length;
+}
+
 function compactMovieForSave(movie) {
   const meta = { ...(movie.meta || {}) };
   delete meta.castDetails;
@@ -36,11 +48,31 @@ function buildStatusLabels() {
 
 let statusLabels = buildStatusLabels();
 
-const historyEventLabels = {
-  added: 'Добавлен в список',
-  status: 'Изменён статус',
-  rating: 'Изменена оценка'
-};
+function normalizeStatus(raw) {
+  if (!raw) return 'want';
+  const lower = String(raw).trim().toLowerCase();
+  if (lower === 'want' || lower === 'watching' || lower === 'watched') return lower;
+  const map = {
+    'хочу посмотреть': 'want',
+    'смотрю': 'watching',
+    'посмотрел': 'watched',
+    'want to watch': 'want',
+    'көргім келеді': 'want',
+    'көріп жатырмын': 'watching',
+    'көрдім': 'watched'
+  };
+  return map[lower] || 'want';
+}
+
+function buildHistoryEventLabels() {
+  return {
+    added: T('history.added', 'Добавлен в список'),
+    status: T('history.status', 'Изменён статус'),
+    rating: T('history.rating', 'Изменена оценка')
+  };
+}
+
+let historyEventLabels = buildHistoryEventLabels();
 
 function formatOriginalTitleHtml(originalTitle, displayTitle, className = 'movie-original-title') {
   return window.MovieDisplay?.formatOriginalTitleHtml(originalTitle, displayTitle, className) || '';
@@ -87,20 +119,24 @@ function describeHistoryEntry(entry) {
   if (!entry) return '';
 
   if (entry.type === 'added') {
-    return `Статус при добавлении: ${statusLabels[entry.status] || entry.status}`;
+    return T('history.addedStatus', `Статус при добавлении: ${statusLabels[entry.status] || entry.status}`, {
+      status: statusLabels[entry.status] || entry.status
+    });
   }
 
   if (entry.type === 'status') {
     const from = statusLabels[entry.from] || entry.from;
     const to = statusLabels[entry.to] || entry.to;
-    const rating = entry.rating != null ? `, оценка ${entry.rating}/10` : '';
-    return `${from} → ${to}${rating}`;
+    const rating = entry.rating != null
+      ? T('history.ratingSuffix', `, оценка ${entry.rating}/10`, { rating: entry.rating })
+      : '';
+    return T('history.statusChange', `${from} → ${to}${rating}`, { from, to, rating });
   }
 
   if (entry.type === 'rating') {
     const from = entry.from != null ? `${entry.from}/10` : '—';
     const to = entry.to != null ? `${entry.to}/10` : '—';
-    return `${from} → ${to}`;
+    return T('history.ratingChange', `${from} → ${to}`, { from, to });
   }
 
   return historyEventLabels[entry.type] || entry.type;
@@ -114,6 +150,18 @@ function escapeHtml(text) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/"/g, '&quot;');
+}
+
+function movieDisplayTitle(movie) {
+  return window.MovieDisplay?.displayTitle(movie) || movie.title || '';
+}
+
+function movieDisplayGenre(genre) {
+  return window.MovieDisplay?.displayGenre(genre) || genre || '';
+}
+
+function movieDisplayGenres(movie) {
+  return window.MovieDisplay?.displayGenres(movie) || movie.genres || [];
 }
 
 function normalizeDisplay(text) {
@@ -167,8 +215,10 @@ function renderExternalRatings(meta) {
 }
 
 function renderOverview(movie) {
-  const text = movie.meta?.overview;
+  const text = window.MovieDisplay?.displayOverview(movie) || movie.meta?.overview;
   if (!text) return '';
+
+  const readMore = window.t ? window.t('movie.readMore', 'Читать полностью') : 'Читать полностью';
 
   if (text.length <= OVERVIEW_PREVIEW_LENGTH) {
     return `<p class="movie-overview">${escapeHtml(text)}</p>`;
@@ -177,7 +227,7 @@ function renderOverview(movie) {
   const preview = `${escapeHtml(text.slice(0, OVERVIEW_PREVIEW_LENGTH).trim())}…`;
   return `
     <p class="movie-overview">${preview}</p>
-    <button type="button" class="overview-toggle" data-id="${movie.id}">Читать полностью</button>
+    <button type="button" class="overview-toggle" data-id="${movie.id}">${escapeHtml(readMore)}</button>
   `;
 }
 
@@ -278,12 +328,10 @@ function matchesListSearch(movie, query) {
 }
 
 function normalizeMovie(movie) {
-  // Миграция: статус «Смотрю» удалён → переносим в «Хочу посмотреть».
-  const rawStatus = movie.status || 'want';
   const normalized = {
     id: movie.id,
     title: movie.title,
-    status: rawStatus === 'watching' ? 'want' : rawStatus,
+    status: normalizeStatus(movie.status),
     rating: movie.rating ?? null,
     watchedAt: movie.watchedAt ?? null,
     addedAt: movie.addedAt ?? null,
@@ -559,7 +607,8 @@ async function enrichAllMovies() {
 
 async function applyTmdbData(movie, tmdbId, matchSource = 'auto') {
   const mediaType = movie.mediaType || 'movie';
-  const res = await fetch(`/api/movie/details/${tmdbId}?type=${mediaType}`, {
+  const appLang = window.I18N?.getLang?.() || 'ru';
+  const res = await fetch(`/api/movie/details/${tmdbId}?type=${mediaType}&lang=${encodeURIComponent(appLang)}`, {
     cache: 'no-store',
     headers: window.authHeaders()
   });
@@ -654,7 +703,8 @@ async function addMovie(data) {
     return result;
   }
   if (result.success) {
-    if (result.movie.meta?.poster && result.movie.tmdbId) {
+    if ((result.movie.meta?.poster && result.movie.tmdbId)
+      || (result.movie.tmdbId && data.meta?.matchSource === 'discover')) {
       renderMovies();
     } else {
       await enrichMovie(result.movie);
@@ -830,8 +880,7 @@ async function executeActions(actions) {
 
 function getTabFilteredMovies() {
   return movies.filter((m) => {
-    const type = m.mediaType || 'movie';
-    if (activeFilters.mediaType && type !== activeFilters.mediaType) return false;
+    if (!movieMatchesMediaTab(m)) return false;
     if (activeFilters.genre && !m.genres.some((g) => g.toLowerCase().includes(activeFilters.genre.toLowerCase()))) return false;
     if (activeFilters.tag && !m.tags.some((t) => t.toLowerCase().includes(activeFilters.tag.toLowerCase()))) return false;
     if (!matchesListSearch(m, activeFilters.search)) return false;
@@ -928,7 +977,7 @@ function getMoviePageHref(movie) {
 }
 
 function buildMovieGridPosterHtml(movie, watchUrl) {
-  const safeTitle = escapeHtml(movie.title);
+  const safeTitle = escapeHtml(movieDisplayTitle(movie));
   const posterUrl = window.MovieDisplay?.posterUrl(movie.meta?.poster) || movie.meta?.poster;
   const posterInner = posterUrl
     ? `<img class="movie-poster--grid" src="${escapeHtml(posterUrl)}" alt="${safeTitle}" loading="lazy" decoding="async">`
@@ -941,7 +990,7 @@ function buildMovieGridPosterHtml(movie, watchUrl) {
 }
 
 function buildMoviePosterHtml(movie, watchUrl) {
-  const safeTitle = escapeHtml(movie.title);
+  const safeTitle = escapeHtml(movieDisplayTitle(movie));
   const posterUrl = window.MovieDisplay?.posterUrl(movie.meta?.poster) || movie.meta?.poster;
   const posterInner = posterUrl
     ? `<img class="movie-poster" src="${escapeHtml(posterUrl)}" alt="${safeTitle}" loading="lazy" decoding="async">`
@@ -954,9 +1003,9 @@ function buildMoviePosterHtml(movie, watchUrl) {
 }
 
 function buildMovieDetailsHtml(movie, watchUrl) {
-  const safeTitle = escapeHtml(movie.title);
+  const safeTitle = escapeHtml(movieDisplayTitle(movie));
   const isTv = movie.mediaType === 'tv';
-  const originalTitleHtml = formatOriginalTitleHtml(movie.meta?.originalTitle, movie.title);
+  const originalTitleHtml = formatOriginalTitleHtml(movie.meta?.originalTitle, movieDisplayTitle(movie));
   const typeBadge = isTv ? '<span class="media-badge media-badge--tv">Сериал</span>' : '';
   const releaseBadge = formatReleaseBadge(movie);
 
@@ -976,8 +1025,8 @@ function buildMovieDetailsHtml(movie, watchUrl) {
   ).join(', ');
   const castHtml = castLinks ? `<p class="movie-people-line">В ролях: ${castLinks}</p>` : '';
 
-  const tagsHtml = [...movie.genres, ...movie.tags]
-    .map((t) => `<span class="tag-chip">${t}</span>`).join('');
+  const tagsHtml = [...movieDisplayGenres(movie), ...movie.tags]
+    .map((t) => `<span class="tag-chip">${escapeHtml(t)}</span>`).join('');
 
   const pageHref = getMoviePageHref(movie);
   const titleLink = pageHref
@@ -1005,19 +1054,17 @@ function buildMovieDetailsHtml(movie, watchUrl) {
   `;
 }
 
-function changeMovieStatus(movieId, newStatus) {
+async function changeMovieStatus(movieId, newStatus) {
   const movie = findMovieById(movieId);
   if (!movie || movie.status === newStatus) return;
 
   let rating = movie.rating;
   if (newStatus === 'watched') {
-    const input = window.prompt(`Оценка для «${movie.title}» (1–10):`, rating ?? '');
-    if (input === null) return;
-    const value = Number(input);
-    if (!Number.isFinite(value) || value < 1 || value > 10) {
-      window.alert('Нужна оценка от 1 до 10');
-      return;
-    }
+    const value = await window.promptWatchedRating?.({
+      title: movie.title,
+      initialRating: rating ?? undefined
+    });
+    if (value == null) return;
     rating = value;
   }
 
@@ -1145,7 +1192,7 @@ function createMovieGridItem(movie) {
   li.dataset.status = movie.status;
 
   const watchUrl = getWatchUrl(movie);
-  const safeTitle = escapeHtml(movie.title);
+  const safeTitle = escapeHtml(movieDisplayTitle(movie));
   const isTv = movie.mediaType === 'tv';
   const typeBadge = isTv ? '<span class="media-badge media-badge--tv media-badge--grid">Сериал</span>' : '';
   const releaseBadge = formatReleaseBadge(movie);
@@ -1250,7 +1297,7 @@ function renderFlatList(filtered) {
 
 function updateListCount(filteredCount) {
   if (!listCountEl) return;
-  const totalInTab = movies.filter((m) => (m.mediaType || 'movie') === activeFilters.mediaType).length;
+  const totalInTab = countMoviesInMediaTab(activeFilters.mediaType);
   listCountEl.textContent = filteredCount === totalInTab
     ? T('list.inList', `${filteredCount} в списке`, { n: filteredCount })
     : T('list.shownOf', `Показано ${filteredCount} из ${totalInTab}`, { n: filteredCount, total: totalInTab });
@@ -1292,8 +1339,12 @@ function syncFilterUI() {
   document.querySelectorAll('.media-tab').forEach((tab) => {
     const type = tab.dataset.media;
     tab.classList.toggle('media-tab--active', type === activeFilters.mediaType);
-    const count = movies.filter((m) => (m.mediaType || 'movie') === type).length;
-    const label = type === 'tv' ? T('list.tabSeries', 'Сериалы') : T('list.tabMovies', 'Фильмы');
+    const count = countMoviesInMediaTab(type);
+    const label = type === 'tv'
+      ? T('list.tabSeries', 'Сериалы')
+      : type === 'animation'
+        ? T('list.tabAnimation', 'Мульт и аниме')
+        : T('list.tabMovies', 'Фильмы');
     tab.textContent = count ? `${label} (${count})` : label;
   });
 
@@ -1301,7 +1352,9 @@ function syncFilterUI() {
   if (listTitle) {
     listTitle.textContent = activeFilters.mediaType === 'tv'
       ? T('list.titleSeries', 'Мои сериалы')
-      : T('list.title', 'Мои фильмы');
+      : activeFilters.mediaType === 'animation'
+        ? T('list.titleAnimation', 'Мультфильмы и аниме')
+        : T('list.title', 'Мой список');
   }
 
   const addSeriesBtn = document.getElementById('add-series-btn');
@@ -1325,15 +1378,16 @@ function syncFilterUI() {
 function updateFilterOptions() {
   const genres = new Set();
   const tags = new Set();
-  movies.forEach((m) => {
+  movies.filter((m) => movieMatchesMediaTab(m)).forEach((m) => {
     m.genres.forEach((g) => genres.add(g));
     m.tags.forEach((t) => tags.add(t));
   });
 
   if (filterGenre) {
-    filterGenre.innerHTML = '<option value="">Все жанры</option>';
+    const allGenresLabel = window.t ? window.t('list.allGenres') : 'Все жанры';
+    filterGenre.innerHTML = `<option value="">${escapeHtml(allGenresLabel)}</option>`;
     [...genres].sort().forEach((g) => {
-      filterGenre.innerHTML += `<option value="${g}">${g}</option>`;
+      filterGenre.innerHTML += `<option value="${escapeHtml(g)}">${escapeHtml(movieDisplayGenre(g))}</option>`;
     });
   }
   if (filterTag) {
@@ -1364,7 +1418,11 @@ function renderMovies() {
   if (filtered.length === 0) {
     if (emptyMessage) {
       emptyMessage.style.display = 'block';
-      const typeLabel = activeFilters.mediaType === 'tv' ? T('list.ofSeries', 'сериалов') : T('list.ofMovies', 'фильмов');
+      const typeLabel = activeFilters.mediaType === 'tv'
+        ? T('list.ofSeries', 'сериалов')
+        : activeFilters.mediaType === 'animation'
+          ? T('list.ofAnimation', 'мультфильмов и аниме')
+          : T('list.ofMovies', 'фильмов');
       if (activeFilters.search) {
         emptyMessage.textContent = T('list.noSearch', `По запросу «${activeFilters.search}» ничего не найдено.`, { q: activeFilters.search });
       } else if (activeFilters.release === 'premieres') {
@@ -1394,9 +1452,13 @@ function renderMovies() {
 
 // Смена языка: пересобираем подписи статусов и перерисовываем список и
 // зависимые блоки, чтобы динамический интерфейс тоже переводился.
-document.addEventListener('i18n:change', () => {
+document.addEventListener('i18n:change', async () => {
   statusLabels = buildStatusLabels();
-  try { renderMovies(); } catch (e) { /* список ещё не готов */ }
+  historyEventLabels = buildHistoryEventLabels();
+  try {
+    await window.MovieDisplay?.localizeTitles?.(movies);
+    renderMovies();
+  } catch (e) { /* список ещё не готов */ }
   window.refreshExtendedFeatures?.();
   window.BattleUI?.refresh?.();
 });
@@ -1519,6 +1581,7 @@ async function loadMovies(options = {}) {
     activeFilters.search = '';
     activeFilters.release = 'all';
 
+    await window.MovieDisplay?.localizeTitles?.(movies);
     renderMovies();
     return;
   }
@@ -1547,6 +1610,7 @@ async function loadMovies(options = {}) {
   activeFilters.search = '';
   activeFilters.release = 'all';
 
+  await window.MovieDisplay?.localizeTitles?.(movies);
   renderMovies();
   if (needsHistoryMigration) {
     const putRes = await fetch('/api/movies', {
@@ -1700,8 +1764,13 @@ async function saveBattleResults({ mode, genre, mediaType, results, matches }) {
   }
 }
 
+function isAuthenticated() {
+  return typeof window.isLoggedIn === 'function' && window.isLoggedIn();
+}
+
 window.MovieApp = {
   init,
+  isAuthenticated,
   getMovies,
   executeActions,
   addMovie,

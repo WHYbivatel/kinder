@@ -37,6 +37,8 @@
 
   let overlayEl = null;
 
+  const T = (k, f, v) => (window.t ? window.t(k, v) : f);
+
   function escapeHtml(text) {
     return String(text)
       .replace(/&/g, '&amp;')
@@ -230,11 +232,12 @@
     container.className = `psych-step-content psych-step-content--${state.step}`;
 
     if (state.step === 'intro') {
+      const T = (k, f, v) => (window.t ? window.t(k, v) : f);
       container.innerHTML = `
-        <p class="psych-eyebrow">Профиль восприятия</p>
-        <h2 id="psych-step-title" class="psych-title">Подбор по вашему внутреннему состоянию</h2>
-        <p class="psych-lead">Это не медицинская диагностика, а короткий тест для более точных рекомендаций фильмов и сериалов.</p>
-        <button type="button" class="btn-primary psych-start-inner" id="psych-begin-btn">Начать</button>
+        <p class="psych-eyebrow">${escapeHtml(T('psych.intro.eyebrow', 'Профиль восприятия'))}</p>
+        <h2 id="psych-step-title" class="psych-title">${escapeHtml(T('psych.intro.title', 'Подбор по вашему внутреннему состоянию'))}</h2>
+        <p class="psych-lead">${escapeHtml(T('psych.intro.lead', 'Это не медицинская диагностика, а короткий тест для более точных рекомендаций фильмов и сериалов.'))}</p>
+        <button type="button" class="btn-primary psych-start-inner" id="psych-begin-btn">${escapeHtml(T('psych.intro.start', T('test.start', 'Начать')))}</button>
       `;
       container.querySelector('#psych-begin-btn')?.addEventListener('click', () => {
         state.step = 'question';
@@ -245,12 +248,13 @@
     }
 
     if (state.step === 'confirm-exit') {
+      const T = (k, f, v) => (window.t ? window.t(k, v) : f);
       container.innerHTML = `
-        <h2 id="psych-step-title" class="psych-title">Выйти из теста?</h2>
-        <p class="psych-lead">Ваши текущие ответы не сохранятся.</p>
+        <h2 id="psych-step-title" class="psych-title">${escapeHtml(T('psych.exit.title', 'Выйти из теста?'))}</h2>
+        <p class="psych-lead">${escapeHtml(T('psych.exit.lead', 'Ваши текущие ответы не сохранятся.'))}</p>
         <div class="psych-actions">
-          <button type="button" class="btn-primary" id="psych-continue-btn">Продолжить тест</button>
-          <button type="button" class="psych-btn-ghost" id="psych-exit-btn">Выйти</button>
+          <button type="button" class="btn-primary" id="psych-continue-btn">${escapeHtml(T('psych.exit.continue', 'Продолжить тест'))}</button>
+          <button type="button" class="psych-btn-ghost" id="psych-exit-btn">${escapeHtml(T('psych.exit.leave', 'Выйти'))}</button>
         </div>
       `;
       container.querySelector('#psych-continue-btn')?.addEventListener('click', () => {
@@ -271,7 +275,7 @@
         <div class="psych-progress-wrap">
           <div class="psych-progress-bar" style="width:${progress}%"></div>
         </div>
-        <p class="psych-progress-label">Вопрос ${state.currentIndex + 1} из ${state.questions.length}</p>
+        <p class="psych-progress-label">${escapeHtml(T('psych.progress', `Вопрос ${state.currentIndex + 1} из ${state.questions.length}`, { n: state.currentIndex + 1, total: state.questions.length }))}</p>
         <h2 id="psych-step-title" class="psych-question">${escapeHtml(q.text)}</h2>
         <div class="psych-options" role="radiogroup">
           ${q.options.map((opt) => `
@@ -282,8 +286,8 @@
           `).join('')}
         </div>
         <div class="psych-nav">
-          <button type="button" class="psych-btn-ghost" id="psych-back-btn"${state.currentIndex === 0 ? ' disabled' : ''}>Назад</button>
-          <button type="button" class="btn-primary" id="psych-next-btn">${state.currentIndex === state.questions.length - 1 ? 'Завершить' : 'Далее'}</button>
+          <button type="button" class="psych-btn-ghost" id="psych-back-btn"${state.currentIndex === 0 ? ' disabled' : ''}>${escapeHtml(T('common.back', '‹ Назад').replace('‹ ', ''))}</button>
+          <button type="button" class="btn-primary" id="psych-next-btn">${escapeHtml(state.currentIndex === state.questions.length - 1 ? T('psych.finish', 'Завершить') : T('psych.next', 'Далее'))}</button>
         </div>
         <p class="psych-error hidden" id="psych-answer-error">Выберите вариант ответа</p>
       `;
@@ -348,7 +352,7 @@
           <ul class="psych-avoid">${(r.avoid || []).map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>
         </div>
         <div class="psych-actions psych-actions--result">
-          <button type="button" class="btn-primary" id="psych-get-recs-btn">Получить рекомендации</button>
+          <button type="button" class="btn-primary" id="psych-get-recs-btn">${escapeHtml(T('test.getRecs', 'Получить рекомендации'))}</button>
           ${saveBtn}
           <button type="button" class="psych-btn-ghost" id="psych-retake-btn">Пройти заново</button>
           <button type="button" class="psych-btn-ghost" id="psych-close-result-btn">Закрыть</button>
@@ -379,7 +383,7 @@
         <p class="psych-lead">Вы можете посмотреть историю изменений в профиле.</p>
         <div class="psych-actions">
           <button type="button" class="btn-primary" id="psych-open-profile-btn">Открыть профиль</button>
-          <button type="button" class="btn-primary" id="psych-saved-recs-btn">Получить рекомендации</button>
+          <button type="button" class="btn-primary" id="psych-saved-recs-btn">${escapeHtml(T('test.getRecs', 'Получить рекомендации'))}</button>
           <button type="button" class="psych-btn-ghost" id="psych-saved-close-btn">Закрыть</button>
         </div>
       `;
@@ -408,10 +412,10 @@
         <h2 id="psych-step-title" class="psych-title">Рекомендации по вашему профилю</h2>
         <p class="psych-lead psych-recs-based-on">${escapeHtml(basedOnLabel)}</p>
         <p class="psych-lead">Мы учли результат теста, ваши оценки, просмотренные фильмы и ограничения.</p>
-          <div id="psych-recs-list" class="psych-recs-list">${window.LoadingUI.aiRecommendations('Подбираю рекомендации...', 4)}</div>
+          <div id="psych-recs-list" class="psych-recs-list">${window.LoadingUI.aiRecommendations(T('test.pickingRecs', 'Подбираю рекомендации...'), 4)}</div>
         <div class="psych-actions">
           <button type="button" class="psych-btn-ghost" id="psych-recs-back-btn">Назад к результату</button>
-          <button type="button" class="psych-btn-ghost" id="psych-recs-refresh-btn">Обновить</button>
+          <button type="button" class="psych-btn-ghost" id="psych-recs-refresh-btn">${escapeHtml(T('common.refresh', 'Обновить'))}</button>
         </div>
       `;
       container.querySelector('#psych-recs-back-btn')?.addEventListener('click', () => {
@@ -441,7 +445,7 @@
 
     const container = ensureOverlay().querySelector('#psych-step-content');
     if (container) {
-      container.innerHTML = '<div class="psych-loading">' + window.LoadingUI.ai('Считаем ваш профиль восприятия...', { panel: true, tag: false }) + '</div>';
+      container.innerHTML = '<div class="psych-loading">' + window.LoadingUI.ai(T('test.buildingPsychProfile', 'Считаем ваш профиль восприятия...'), { panel: true, tag: false }) + '</div>';
     }
 
     try {
@@ -451,7 +455,7 @@
         body: JSON.stringify({ answers })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Не удалось сохранить');
+      if (!res.ok) throw new Error(data.error || T('test.saveFailed', 'Ошибка сохранения'));
 
       state.psychTest = data.psychTest;
       state.result = {
@@ -502,7 +506,7 @@
           <h3>${escapeHtml(item.title)}</h3>
           <span class="psych-rec-meta">${escapeHtml(item.year || '')} · ${typeLabel}</span>
         </div>
-        ${item.genres?.length ? `<p class="psych-rec-genres">${item.genres.map(escapeHtml).join(' · ')}</p>` : ''}
+        ${item.genres?.length ? `<p class="psych-rec-genres">${(window.MovieDisplay?.displayGenres(item) || item.genres).map(escapeHtml).join(' · ')}</p>` : ''}
         <p class="psych-rec-reason">${escapeHtml(item.reason || '')}</p>
         ${item.testConnection ? `<p class="psych-rec-connection">${escapeHtml(item.testConnection)}</p>` : ''}
         <div class="psych-rec-actions">
@@ -531,7 +535,7 @@
           addBtn.disabled = true;
           addBtn.classList.add('rec-add-btn--added');
         } else {
-          toast(results?.[0]?.error || 'Не удалось добавить', 'error');
+          toast(results?.[0]?.error || T('test.addFailed', 'Не удалось добавить'), 'error');
         }
       });
     }
@@ -559,9 +563,9 @@
             const data = await res.json();
             if (!res.ok) throw new Error(data.error);
             card.classList.add('psych-rec-card--dismissed');
-            toast('Учтём в следующих рекомендациях', 'success');
+            toast(T('test.feedbackSaved', 'Учтём в следующих рекомендациях'), 'success');
           } catch (err) {
-            toast(err.message || 'Не удалось сохранить', 'error');
+            toast(err.message || T('test.saveFailed', 'Ошибка сохранения'), 'error');
           }
         });
       });
@@ -574,7 +578,7 @@
     const listEl = document.getElementById('psych-recs-list');
     if (!listEl) return;
 
-    listEl.innerHTML = window.LoadingUI.aiRecommendations('Подбираю рекомендации...', 4);
+    listEl.innerHTML = window.LoadingUI.aiRecommendations(T('test.pickingRecs', 'Подбираю рекомендации...'), 4);
     state.basedOn = null;
 
     try {
@@ -595,7 +599,7 @@
       const data = await res.json();
 
       if (!res.ok) {
-        listEl.innerHTML = `<p class="psych-recs-error">${escapeHtml(data.error || 'Не удалось загрузить рекомендации')}</p>`;
+        listEl.innerHTML = `<p class="psych-recs-error">${escapeHtml(data.error || T('test.recsLoadError', 'Не удалось загрузить рекомендации'))}</p>`;
         return;
       }
 
@@ -607,7 +611,7 @@
 
       const recs = data.recommendations || [];
       if (!recs.length) {
-        listEl.innerHTML = '<p class="psych-recs-error">Пока нет подходящих рекомендаций. Попробуйте обновить позже.</p>';
+        listEl.innerHTML = `<p class="psych-recs-error">${escapeHtml(T('test.recsEmpty', 'Пока нет подходящих рекомендаций. Попробуйте обновить позже.'))}</p>`;
         return;
       }
 
@@ -621,7 +625,7 @@
   async function refresh() {
     const block = document.getElementById('psych-test-section');
     if (block) {
-      block.innerHTML = '<div class="psych-home-card">' + window.LoadingUI.ai('Загрузка теста...', { panel: true, compact: true, tag: false }) + '</div>';
+      block.innerHTML = '<div class="psych-home-card">' + window.LoadingUI.ai(T('test.loadingTest', 'Загрузка теста...'), { panel: true, compact: true, tag: false }) + '</div>';
     }
     try {
       const res = await fetch('/api/psych-test', { headers: window.authHeaders() });

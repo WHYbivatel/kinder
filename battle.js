@@ -16,6 +16,8 @@
     animating: false
   };
 
+  const T = (key, fallback, vars) => (window.t ? window.t(key, vars) : fallback);
+
   function esc(text) {
     return D?.escapeHtml(text) || String(text);
   }
@@ -48,7 +50,8 @@
   }
 
   function formatGenres(movie) {
-    return (movie.genres || []).slice(0, 3).join(', ') || '—';
+    const genres = window.MovieDisplay?.displayGenres(movie) || movie.genres || [];
+    return genres.slice(0, 3).join(', ') || '—';
   }
 
   function formatUserRating(movie) {
@@ -64,12 +67,12 @@
 
   function mediaBadge(movie) {
     const isTv = movie.mediaType === 'tv';
-    const label = isTv ? 'Сериал' : 'Фильм';
+    const label = isTv ? T('card.series', 'Сериал') : T('common.film', 'Фильм');
     return `<span class="battle-media-badge">${icon(isTv ? 'tv' : 'film')}${label}</span>`;
   }
 
   function overviewSnippet(movie) {
-    const text = movie.meta?.overview;
+    const text = window.MovieDisplay?.displayOverview?.(movie) || movie.meta?.overview;
     if (!text) return '';
     const short = text.length > 100 ? `${text.slice(0, 100).trim()}…` : text;
     return `<p class="battle-card-overview">${esc(short)}</p>`;
@@ -86,15 +89,15 @@
         class="battle-card battle-card--${side}${selectable ? '' : ' battle-card--static'}"
         data-movie-id="${movie.id}"
         ${selectable ? '' : 'disabled'}
-        aria-label="Выбрать ${esc(movie.title)}">
+        aria-label="${esc(T('battle.selectAria', `Выбрать ${movie.title}`, { title: movie.title }))}">
         ${mediaBadge(movie)}
         <div class="battle-card-poster-wrap">${posterHtml}</div>
         <div class="battle-card-body">
           <h3 class="battle-card-title">${esc(movie.title)}</h3>
           <p class="battle-card-meta">${esc(movie.meta?.year || '—')}</p>
-          <p class="battle-card-rating">Ваша оценка: <strong>${esc(formatUserRating(movie))}</strong></p>
+          <p class="battle-card-rating">${esc(T('battle.yourRating', 'Ваша оценка'))}: <strong>${esc(formatUserRating(movie))}</strong></p>
           ${externalRatingsHtml(movie)}
-          ${selectable ? `<span class="battle-card-pick">${icon('check')}Выбрать</span>` : ''}
+          ${selectable ? `<span class="battle-card-pick">${icon('check')}${esc(T('battle.pick', 'Выбрать'))}</span>` : ''}
         </div>
       </button>
     `;
@@ -151,8 +154,8 @@
   }
 
   function mediaTypeLabel(mediaType, plural = true) {
-    if (mediaType === 'tv') return plural ? 'сериалов' : 'сериал';
-    return plural ? 'фильмов' : 'фильм';
+    if (mediaType === 'tv') return plural ? T('list.ofSeries', 'сериалов') : T('card.series', 'Сериал');
+    return plural ? T('list.ofMovies', 'фильмов') : T('common.film', 'Фильм');
   }
 
   function scrollToList() {
@@ -178,7 +181,7 @@
           ).join('')}
         </div>
       </div>
-      <button type="button" class="battle-close-btn" data-action="close-notice" aria-label="Закрыть">✕</button>
+      <button type="button" class="battle-close-btn" data-action="close-notice" aria-label="${esc(T('common.close', 'Закрыть'))}">✕</button>
     `;
     bindPanelActions();
   }
@@ -186,24 +189,26 @@
   function showNotEnough(min, count, extra = {}) {
     const mediaType = extra.mediaType || 'movie';
     const typeLabel = mediaTypeLabel(mediaType);
-    let title = 'Пока рано начинать битву';
-    let text = `Чтобы составить честный топ, нужно минимум ${min} просмотренных ${typeLabel}. Сейчас у вас: ${count}.`;
+    let title = T('battle.tooEarly', 'Пока рано начинать битву');
+    let text = T('battle.notEnoughBody', `Чтобы составить честный топ, нужно минимум ${min} просмотренных ${typeLabel}. Сейчас у вас: ${count}.`, { min, type: typeLabel, count });
     if (extra.genre) {
-      title = mediaType === 'tv' ? 'Недостаточно сериалов в этом жанре' : 'Недостаточно фильмов в этом жанре';
-      text = `Для битвы по жанру нужно минимум ${min} просмотренных. В жанре «${extra.genre}» сейчас только ${count}.`;
+      title = mediaType === 'tv'
+        ? T('battle.tooFewGenreSeries', 'Недостаточно сериалов в этом жанре')
+        : T('battle.tooFewGenreMovie', 'Недостаточно фильмов в этом жанре');
+      text = T('battle.notEnoughGenreBody', `Для битвы по жанру нужно минимум ${min} просмотренных. В жанре «${extra.genre}» сейчас только ${count}.`, { min, genre: extra.genre, count });
     } else if (mediaType === 'tv') {
-      title = 'Недостаточно сериалов';
+      title = T('battle.tooFewSeries', 'Недостаточно сериалов');
     }
     const need = min - count;
     if (!extra.genre && need > 0) {
-      text += `<br><br>Добавьте или отметьте как просмотренные ещё ${need} ${typeLabel}, и битва станет доступна.`;
+      text += `<br><br>${esc(T('battle.notEnoughHint', `Добавьте или отметьте как просмотренные ещё ${need} ${typeLabel}, и битва станет доступна.`, { need, type: typeLabel }))}`;
     }
     showNotice({
       title,
       body: `<p>${text}</p>`,
       buttons: [
-        { label: 'Понятно', action: 'close-notice' },
-        { label: 'Перейти к списку', action: 'go-list', primary: true }
+        { label: T('battle.okBtn', 'Понятно'), action: 'close-notice' },
+        { label: T('battle.goListBtn', 'Перейти к списку'), action: 'go-list', primary: true }
       ]
     });
   }
@@ -215,10 +220,10 @@
       confirm.className = 'battle-confirm';
       confirm.innerHTML = `
         <div class="battle-confirm-box battle-fade-in">
-          <p>Выйти из битвы? Прогресс текущей игры будет потерян.</p>
+          <p>${esc(T('battle.confirmExit', 'Выйти из битвы? Прогресс текущей игры будет потерян.'))}</p>
           <div class="battle-notice-actions">
-            <button type="button" class="battle-btn battle-btn--ghost" data-resolve="stay">Остаться</button>
-            <button type="button" class="battle-btn battle-btn--primary" data-resolve="exit">Выйти</button>
+            <button type="button" class="battle-btn battle-btn--ghost" data-resolve="stay">${esc(T('battle.stay', 'Остаться'))}</button>
+            <button type="button" class="battle-btn battle-btn--primary" data-resolve="exit">${esc(T('battle.exit', 'Выйти'))}</button>
           </div>
         </div>
       `;
@@ -263,9 +268,9 @@
       return `
         <button type="button" class="battle-mode-card battle-mode-card--quick${featured}" data-mode="quick" data-media="${mediaType}">
           <span class="battle-mode-icon">${icon('bolt')}</span>
-          <span class="battle-mode-name">Быстрая битва</span>
-          <span class="battle-mode-desc">${isTv ? '8 сериалов, 7 выборов, быстрый топ-3.' : '8 фильмов, 7 выборов, быстрый топ-3.'}</span>
-          ${watched < min ? `<span class="battle-mode-hint">Нужно ${min} ${typeLabel} (сейчас ${watched})</span>` : ''}
+          <span class="battle-mode-name">${esc(T('battle.modeQuick', 'Быстрая битва'))}</span>
+          <span class="battle-mode-desc">${esc(isTv ? T('battle.modeQuickDescSeries', '8 сериалов, 7 выборов, быстрый топ-3.') : T('battle.modeQuickDescMovie', '8 фильмов, 7 выборов, быстрый топ-3.'))}</span>
+          ${watched < min ? `<span class="battle-mode-hint">${esc(T('battle.modeNeedHint', `Нужно ${min} ${typeLabel} (сейчас ${watched})`, { min, type: typeLabel, watched }))}</span>` : ''}
         </button>
       `;
     }
@@ -275,9 +280,9 @@
       return `
         <button type="button" class="battle-mode-card battle-mode-card--full" data-mode="full" data-media="${mediaType}">
           <span class="battle-mode-icon">${icon('trophy')}</span>
-          <span class="battle-mode-name">Полная битва</span>
-          <span class="battle-mode-desc">Более точный рейтинг по всем просмотренным ${typeLabel}.</span>
-          ${watched < min ? `<span class="battle-mode-hint">Нужно ${min} ${typeLabel}</span>` : ''}
+          <span class="battle-mode-name">${esc(T('battle.modeFull', 'Полная битва'))}</span>
+          <span class="battle-mode-desc">${esc(T('battle.modeFullDesc', `Более точный рейтинг по всем просмотренным ${typeLabel}.`, { type: typeLabel }))}</span>
+          ${watched < min ? `<span class="battle-mode-hint">${esc(T('battle.modeNeedMin', `Нужно ${min} ${typeLabel}`, { min, type: typeLabel }))}</span>` : ''}
         </button>
       `;
     }
@@ -285,8 +290,8 @@
     return `
       <button type="button" class="battle-mode-card battle-mode-card--genre" data-mode="genre" data-media="${mediaType}">
         <span class="battle-mode-icon">${icon('tag')}</span>
-        <span class="battle-mode-name">Битва по жанру</span>
-        <span class="battle-mode-desc">${isTv ? 'Лучший сериал в конкретном жанре.' : 'Лучший фильм в конкретном жанре.'}</span>
+        <span class="battle-mode-name">${esc(T('battle.modeGenre', 'Битва по жанру'))}</span>
+        <span class="battle-mode-desc">${esc(isTv ? T('battle.modeGenreDescSeries', 'Лучший сериал в конкретном жанре.') : T('battle.modeGenreDescMovie', 'Лучший фильм в конкретном жанре.'))}</span>
       </button>
     `;
   }
@@ -297,13 +302,13 @@
 
     panel().innerHTML = `
       <header class="battle-header">
-        <h2 class="battle-header-title">${icon('swords')}Выберите режим битвы</h2>
-        <button type="button" class="battle-close-btn" data-action="close" aria-label="Закрыть">✕</button>
+        <h2 class="battle-header-title">${icon('swords')}${esc(T('battle.chooseMode', 'Выберите режим битвы'))}</h2>
+        <button type="button" class="battle-close-btn" data-action="close" aria-label="${esc(T('common.close', 'Закрыть'))}">✕</button>
       </header>
       <div class="battle-mode-sections battle-fade-in">
         <section class="battle-mode-section">
-          <h3 class="battle-mode-section-title">${icon('film')}Битва фильмов <span class="battle-mode-section-count">${movieCount}</span></h3>
-          <p class="battle-mode-section-meta">${movieCount} в «Посмотрел»</p>
+          <h3 class="battle-mode-section-title">${icon('film')}${esc(T('battle.battleMovies', 'Битва фильмов'))} <span class="battle-mode-section-count">${movieCount}</span></h3>
+          <p class="battle-mode-section-meta">${esc(T('battle.inWatched', `${movieCount} в «Посмотрел»`, { count: movieCount }))}</p>
           <div class="battle-mode-grid">
             ${renderModeCard('quick', 'movie')}
             ${renderModeCard('full', 'movie')}
@@ -311,8 +316,8 @@
           </div>
         </section>
         <section class="battle-mode-section">
-          <h3 class="battle-mode-section-title">${icon('tv')}Битва сериалов <span class="battle-mode-section-count">${seriesCount}</span></h3>
-          <p class="battle-mode-section-meta">${seriesCount} в «Посмотрел»</p>
+          <h3 class="battle-mode-section-title">${icon('tv')}${esc(T('battle.battleSeries', 'Битва сериалов'))} <span class="battle-mode-section-count">${seriesCount}</span></h3>
+          <p class="battle-mode-section-meta">${esc(T('battle.inWatched', `${seriesCount} в «Посмотрел»`, { count: seriesCount }))}</p>
           <div class="battle-mode-grid">
             ${renderModeCard('quick', 'tv')}
             ${renderModeCard('full', 'tv')}
@@ -328,20 +333,22 @@
     const watched = L.getWatched(window.MovieApp.getMovies(), { mediaType });
     const genres = L.getGenreCounts(watched);
     const typeLabel = mediaTypeLabel(mediaType);
-    const sectionTitle = mediaType === 'tv' ? 'Выберите жанр сериала' : 'Выберите жанр фильма';
+    const sectionTitle = mediaType === 'tv'
+      ? T('battle.pickGenreSeries', 'Выберите жанр сериала')
+      : T('battle.pickGenreMovie', 'Выберите жанр фильма');
     const emptyText = mediaType === 'tv'
-      ? 'Нет жанров в просмотренных сериалах'
-      : 'Нет жанров в просмотренных фильмах';
+      ? T('battle.noGenresSeries', 'Нет жанров в просмотренных сериалах')
+      : T('battle.noGenresMovie', 'Нет жанров в просмотренных фильмах');
 
     panel().innerHTML = `
       <header class="battle-header">
         <h2 class="battle-header-title">${icon(mediaType === 'tv' ? 'tv' : 'film')}${esc(sectionTitle)}</h2>
-        <button type="button" class="battle-close-btn" data-action="close" aria-label="Закрыть">✕</button>
+        <button type="button" class="battle-close-btn" data-action="close" aria-label="${esc(T('common.close', 'Закрыть'))}">✕</button>
       </header>
       <div class="battle-genre-list battle-fade-in">
         ${genres.length ? genres.map((g) => {
           const disabled = g.count < L.MIN_GENRE;
-          const display = g.name.charAt(0).toUpperCase() + g.name.slice(1);
+          const display = window.MovieDisplay?.displayGenre(g.name) || g.name;
           return `
             <button type="button" class="battle-genre-item${disabled ? ' battle-genre-item--disabled' : ''}"
               data-genre="${esc(g.name)}" data-media="${mediaType}" ${disabled ? 'disabled' : ''}>
@@ -352,7 +359,7 @@
         }).join('') : `<p class="battle-empty">${esc(emptyText)}</p>`}
       </div>
       <div class="battle-footer-actions">
-        <button type="button" class="battle-btn battle-btn--ghost" data-action="modes">${icon('chevronLeft')}Назад</button>
+        <button type="button" class="battle-btn battle-btn--ghost" data-action="modes">${icon('chevronLeft')}${esc(T('common.back', '‹ Назад').replace(/^‹\s*/, ''))}</button>
       </div>
     `;
     bindPanelActions();
@@ -401,25 +408,27 @@
     const progress = state.engine.getProgress();
     const pct = Math.round(((progress.current - 1) / progress.total) * 100);
 
-    const pickLabel = state.battleMeta?.mediaType === 'tv' ? 'сериал' : 'фильм';
+    const pickLabel = state.battleMeta?.mediaType === 'tv'
+      ? T('card.series', 'Сериал').toLowerCase()
+      : T('common.film', 'Фильм').toLowerCase();
 
     panel().innerHTML = `
       <header class="battle-header">
         <div class="battle-header-left">
           <h2 class="battle-header-title">${icon('swords')}${esc(modeHeaderLabel())}</h2>
-          <span class="battle-progress-label">Раунд ${progress.current} / ${progress.total}</span>
+          <span class="battle-progress-label">${esc(T('battle.round', `Раунд ${progress.current} / ${progress.total}`, { current: progress.current, total: progress.total }))}</span>
         </div>
-        <button type="button" class="battle-close-btn" data-action="close" aria-label="Закрыть">✕</button>
+        <button type="button" class="battle-close-btn" data-action="close" aria-label="${esc(T('common.close', 'Закрыть'))}">✕</button>
       </header>
-      <p class="battle-prompt battle-fade-in">Что выбираете?</p>
-      <p class="battle-prompt-sub">Нажмите на ${pickLabel}, который нравится вам больше.</p>
+      <p class="battle-prompt battle-fade-in">${esc(T('battle.promptPick', 'Что выбираете?'))}</p>
+      <p class="battle-prompt-sub">${esc(T('battle.promptSub', `Нажмите на ${pickLabel}, который нравится вам больше.`, { type: pickLabel }))}</p>
       <div class="battle-arena battle-pair-enter" id="battle-arena">
         ${buildBattleCard(pair.left, 'left')}
-        <div class="battle-vs" aria-hidden="true">${icon('swords', 'battle-vs-icon')}<span class="battle-vs-text">VS</span></div>
+        <div class="battle-vs" aria-hidden="true">${icon('swords', 'battle-vs-icon')}<span class="battle-vs-text">${esc(T('battle.vs', 'VS'))}</span></div>
         ${buildBattleCard(pair.right, 'right')}
       </div>
       <footer class="battle-footer">
-        <button type="button" class="battle-btn battle-btn--ghost battle-skip-btn" data-action="skip">${icon('skip')}Пропустить пару</button>
+        <button type="button" class="battle-btn battle-btn--ghost battle-skip-btn" data-action="skip">${icon('skip')}${esc(T('battle.skip', 'Пропустить пару'))}</button>
         <div class="battle-progress-bar-wrap">
           <div class="battle-progress-bar" style="width:${pct}%"></div>
         </div>
@@ -469,9 +478,11 @@
   }
 
   function resultSubtitle(item) {
-    if (item.wins != null && item.wins > 0) return `${item.wins} побед в битве`;
-    if (item.score != null) return `Счёт: ${Math.round(item.score)}`;
-    return 'Ваш фаворит';
+    if (item.wins != null && item.wins > 0) {
+      return T('battle.winsCount', `${item.wins} побед в битве`, { n: item.wins });
+    }
+    if (item.score != null) return T('battle.scoreLabel', `Счёт: ${Math.round(item.score)}`, { score: Math.round(item.score) });
+    return T('battle.favorite', 'Ваш фаворит');
   }
 
   function buildResultCard(item, size) {
@@ -501,14 +512,14 @@
     let body;
     if (isTop10) {
       body = `
-        <h2 class="battle-results-title battle-fade-in">${icon('trophy')}Ваш личный рейтинг</h2>
+        <h2 class="battle-results-title battle-fade-in">${icon('trophy')}${esc(T('battle.personalTop', 'Ваш личный рейтинг'))}</h2>
         <div class="battle-results-list battle-fade-in">
           ${results.map((item) => `
             <div class="battle-results-row battle-result-stagger" data-place="${item.place}">
               <span class="battle-results-rank">#${item.place}</span>
               <span class="battle-results-name">${esc(item.movie.title)}</span>
               <span class="battle-results-year">${esc(item.movie.meta?.year || '')}</span>
-              <span class="battle-results-score">${item.wins} побед · ${Math.round(item.score)}</span>
+              <span class="battle-results-score">${esc(T('battle.winsScore', `${item.wins} побед · ${Math.round(item.score)}`, { wins: item.wins, score: Math.round(item.score) }))}</span>
               <span class="battle-results-rating">${esc(formatUserRating(item.movie))}</span>
             </div>
           `).join('')}
@@ -524,7 +535,7 @@
       const third = ordered.find((r) => r.place === 3) || ordered[2];
 
       body = `
-        <h2 class="battle-results-title battle-fade-in">${icon('trophy')}Ваш топ-3 готов</h2>
+        <h2 class="battle-results-title battle-fade-in">${icon('trophy')}${esc(T('battle.top3Ready', 'Ваш топ-3 готов'))}</h2>
         <div class="battle-results-podium battle-fade-in">
           ${second ? buildResultCard(second, 'second') : ''}
           ${first ? buildResultCard(first, 'first') : ''}
@@ -537,16 +548,16 @@
     panel().innerHTML = `
       <header class="battle-header">
         <h2 class="battle-header-title">${icon('trophy')}${esc(modeHeaderLabel())}</h2>
-        <button type="button" class="battle-close-btn" data-action="close" aria-label="Закрыть">✕</button>
+        <button type="button" class="battle-close-btn" data-action="close" aria-label="${esc(T('common.close', 'Закрыть'))}">✕</button>
       </header>
       ${body}
       <div class="battle-final-actions battle-fade-in">
         <button type="button" class="battle-btn battle-btn--primary" data-action="save"${state.saved ? ' disabled' : ''}>
-          ${state.saved ? `${icon('check')}Сохранено` : `${icon('check')}Сохранить результат`}
+          ${state.saved ? `${icon('check')}${esc(T('battle.saved', 'Сохранено'))}` : `${icon('check')}${esc(T('battle.saveResult', 'Сохранить результат'))}`}
         </button>
-        <button type="button" class="battle-btn battle-btn--ghost" data-action="replay">${icon('refresh')}Сыграть ещё раз</button>
-        <button type="button" class="battle-btn battle-btn--ghost" data-action="modes">${icon('swords')}Другой режим</button>
-        <button type="button" class="battle-btn battle-btn--ghost" data-action="close-finish">Закрыть</button>
+        <button type="button" class="battle-btn battle-btn--ghost" data-action="replay">${icon('refresh')}${esc(T('battle.playAgain', 'Играть снова'))}</button>
+        <button type="button" class="battle-btn battle-btn--ghost" data-action="modes">${icon('swords')}${esc(T('battle.otherMode', 'Другой режим'))}</button>
+        <button type="button" class="battle-btn battle-btn--ghost" data-action="close-finish">${esc(T('common.close', 'Закрыть'))}</button>
       </div>
       <div id="battle-save-error" class="battle-save-error hidden"></div>
     `;
@@ -579,7 +590,7 @@
       });
       if (!ok.success) {
         if (errEl) {
-          errEl.textContent = ok.error || 'Не удалось сохранить результат';
+          errEl.textContent = ok.error || T('battle.saveError', 'Не удалось сохранить результат');
           errEl.classList.remove('hidden');
         }
         return;
@@ -587,13 +598,13 @@
       state.saved = true;
       const saveBtn = panel().querySelector('[data-action="save"]');
       if (saveBtn) {
-        saveBtn.innerHTML = `${icon('check')}Сохранено`;
+        saveBtn.innerHTML = `${icon('check')}${esc(T('battle.saved', 'Сохранено'))}`;
         saveBtn.disabled = true;
       }
       refreshHomeBlock();
     } catch (e) {
       if (errEl) {
-        errEl.textContent = 'Ошибка сохранения. Попробуйте ещё раз.';
+        errEl.textContent = T('battle.saveErrorRetry', 'Ошибка сохранения. Попробуйте ещё раз.');
         errEl.classList.remove('hidden');
       }
     }
@@ -692,9 +703,11 @@
     });
     const modeLabel = L.battleModeLabel(last.mode, last.mediaType || (last.mode === 'series' ? 'tv' : 'movie'));
     topEl.classList.remove('hidden');
+    const lang = window.I18N?.getLang?.() || 'ru';
+    const locale = lang === 'en' ? 'en-US' : lang === 'kk' ? 'kk-KZ' : 'ru-RU';
     topEl.innerHTML = `
-      <h3 class="battle-home-top-title">${icon('trophy')}Мой топ</h3>
-      <p class="battle-home-top-meta">${esc(modeLabel)} · ${new Date(last.createdAt).toLocaleDateString('ru-RU')}</p>
+      <h3 class="battle-home-top-title">${icon('trophy')}${esc(T('battle.homeTop', 'Мой топ'))}</h3>
+      <p class="battle-home-top-meta">${esc(modeLabel)} · ${new Date(last.createdAt).toLocaleDateString(locale)}</p>
       <ol class="battle-home-top-list">
         ${titles.map((t, i) => `<li><span class="battle-home-rank">${i + 1}</span> ${esc(t)}</li>`).join('')}
       </ol>
@@ -722,4 +735,6 @@
   } else {
     initHomeBlock();
   }
+
+  document.addEventListener('i18n:change', refreshHomeBlock);
 })();

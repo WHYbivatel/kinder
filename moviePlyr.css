@@ -1,0 +1,118 @@
+/* Plyr — стили под тёмную тему Kinder */
+:root {
+  --plyr-color-main: var(--accent, #e50914);
+  --plyr-video-background: #050510;
+  --plyr-badge-background: rgba(8, 8, 10, 0.88);
+  --plyr-badge-text-color: #fff;
+  --plyr-menu-background: rgba(12, 12, 16, 0.96);
+  --plyr-menu-color: #f5f5f7;
+  --plyr-control-icon-size: 1.05rem;
+  --plyr-control-spacing: 0.65rem;
+  --plyr-control-radius: 10px;
+  --plyr-font-family: inherit;
+  --plyr-font-size-base: 14px;
+  --plyr-font-size-small: 12px;
+  --plyr-range-fill-background: var(--plyr-color-main);
+  --plyr-range-thumb-background: #fff;
+  --plyr-video-controls-background: linear-gradient(rgba(0, 0, 0, 0), rgba(5, 5, 16, 0.88));
+}
+
+.custom-player-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-md);
+  overflow: visible;
+  background: #000;
+}
+
+.custom-player-shell .plyr__video-wrapper {
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.custom-player-shell .plyr {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.custom-player-shell .plyr__video-wrapper,
+.custom-player-shell video.movie-player-video {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.custom-player-shell .plyr--video .plyr__controls {
+  padding: 0.55rem 0.65rem calc(0.55rem + env(safe-area-inset-bottom, 0px));
+}
+
+.custom-player-shell .plyr__control--overlaid {
+  background: rgba(229, 9, 20, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.custom-player-shell .plyr__control--overlaid:hover {
+  background: var(--accent-hover, #f40612);
+}
+
+/* Меню настроек (качество / субтитры / скорость) — прокрутка длинных списков */
+.custom-player-shell .plyr__menu__container {
+  max-height: min(16rem, 55vh) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.custom-player-shell .plyr__menu__container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-player-shell .plyr__menu__container::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.custom-player-shell .plyr__menu__container [role="menu"] {
+  max-height: none;
+}
+
+@media (max-width: 640px) {
+  .custom-player-shell .plyr__controls {
+    padding: 0.45rem 0.5rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .custom-player-shell .plyr__control {
+    min-height: 2.35rem;
+    min-width: 2.35rem;
+  }
+}
+
+/* Полноэкранный режим на телефоне — видео на весь экран, в т.ч. в landscape */
+.plyr--fullscreen-active,
+.plyr--fullscreen-fallback {
+  width: 100%;
+  height: 100%;
+}
+
+.plyr--fullscreen-active .plyr__video-wrapper,
+.plyr--fullscreen-fallback .plyr__video-wrapper,
+.plyr--fullscreen-active video,
+.plyr--fullscreen-fallback video {
+  width: 100%;
+  height: 100%;
+}
+
+body.player-fullscreen-active .plyr--fullscreen-active,
+body.player-fullscreen-active .plyr--fullscreen-fallback {
+  padding:
+    env(safe-area-inset-top, 0px)
+    env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
+}

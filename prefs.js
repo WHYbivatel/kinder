@@ -21,7 +21,8 @@ const DEFAULT_PREFS = {
   visualTestHistory: [],
   visualRecFeedback: [],
   shortVisualTests: { lastResults: {}, history: [] },
-  shortVisualRecFeedback: []
+  shortVisualRecFeedback: [],
+  discoverSwipeSkips: []
 };
 
 export function getPrefsPath(dataDir, username) {
@@ -43,7 +44,8 @@ export function loadUserPrefs(dataDir, username) {
     visualTestHistory: raw.visualTestHistory || [],
     visualRecFeedback: raw.visualRecFeedback || [],
     shortVisualTests: raw.shortVisualTests || { lastResults: {}, history: [] },
-    shortVisualRecFeedback: raw.shortVisualRecFeedback || []
+    shortVisualRecFeedback: raw.shortVisualRecFeedback || [],
+    discoverSwipeSkips: raw.discoverSwipeSkips || []
   };
 }
 

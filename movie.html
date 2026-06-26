@@ -6,23 +6,31 @@
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#08080a">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Фильм — Мои фильмы</title>
+  <title>Фильм — Kinder</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="/icons/favicon-16.png" type="image/png" sizes="16x16">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="appShell.css">
   <link rel="stylesheet" href="mobile.css">
+  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+  <link rel="stylesheet" href="moviePlyr.css">
   <script src="theme.js"></script>
+  <script src="locales/ru.js"></script>
+  <script src="locales/kk.js"></script>
+  <script src="locales/en.js"></script>
   <script src="i18n.js"></script>
   <script src="mobileShell.js"></script>
 </head>
 <body data-page="movie">
   <header class="moviepage-topbar">
     <button type="button" id="movie-back" class="moviepage-back" aria-label="Назад" data-i18n="common.back">‹ Назад</button>
-    <a href="/" class="moviepage-home" aria-label="На главную" data-i18n-aria="common.home">🎬</a>
+    <a href="/" class="moviepage-home" aria-label="На главную" data-i18n-aria="common.home"><img src="/icons/brand-mark.png" alt="" width="30" height="30" decoding="async"></a>
   </header>
 
   <main id="movie-root" class="moviepage" aria-live="polite">
@@ -36,6 +44,20 @@
 
   <div id="movie-toast" class="movie-toast" role="status" aria-live="polite" hidden></div>
 
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-title"></h3>
+        <button type="button" id="modal-close">✕</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="display.js"></script>
+  <script src="watchedRatingModal.js"></script>
+  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+  <script src="moviePlyr.js"></script>
   <script src="movie.js"></script>
 </body>
 </html>

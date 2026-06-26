@@ -22,10 +22,20 @@
   var indexEl = section.querySelector('#catalog-index');
   var topItemsEl = section.querySelector('#catalog-top-items');
   var topFilterEl = section.querySelector('#catalog-top-filter');
+  var searchInput = section.querySelector('#catalog-search');
+  var searchFilterEl = section.querySelector('#catalog-search-filter');
+  var searchPanelEl = section.querySelector('#catalog-search-panel');
+  var searchResultsEl = section.querySelector('#catalog-search-results');
+  var movieRequestCompactEl = section.querySelector('#catalog-movie-request');
 
-  var loadedCollections = {};   // id → true (уже загружено/в процессе)
-  var topLoaded = {};           // filter → true
+  var loadedCollections = {};
+  var topLoaded = {};
   var io = null;
+  var catalogGroups = [];
+  var activeGroupId = null;
+  var searchFilter = 'all';
+  var searchTimer = null;
+  var searchSeq = 0;
 
   function esc(text) {
     return (window.MovieDisplay && window.MovieDisplay.escapeHtml)
@@ -40,7 +50,11 @@
 
   // Язык для запросов к каталогу (TMDB-названия/описания приходят на нём).
   function lang() {
-    return (window.I18N && window.I18N.tmdbLang) ? window.I18N.tmdbLang() : 'ru';
+    return (window.I18N && window.I18N.getLang) ? window.I18N.getLang() : 'ru';
+  }
+
+  function tmdbApiLang() {
+    return (window.I18N && window.I18N.tmdbLang) ? window.I18N.tmdbLang() : 'ru-RU';
   }
 
   function withLang(url) {
@@ -270,12 +284,37 @@
   }
 
   function renderIndex(data) {
-    var sections = (data && data.sections) || [];
-    if (!sections.length) { indexEl.innerHTML = ''; return; }
+    catalogGroups = (data && data.groups) || [];
+    if (!catalogGroups.length) { indexEl.innerHTML = ''; return; }
+
+    if (!activeGroupId || !catalogGroups.some(function (g) { return g.id === activeGroupId; })) {
+      activeGroupId = catalogGroups[0].id;
+    }
+
+    var tabsHtml = catalogGroups.map(function (g) {
+      var active = g.id === activeGroupId;
+      return '<button type="button" class="cat-group-tab' + (active ? ' cat-group-tab--active' : '') + '" data-group="' + esc(g.id) + '" aria-selected="' + (active ? 'true' : 'false') + '">' + esc(g.title) + '</button>';
+    }).join('');
 
     indexEl.innerHTML = '' +
-      '<div class="cat-chips" role="tablist" aria-label="' + esc(tt('catalog.categories', 'Категории')) + '">' +
-        sections.map(function (s) {
+      '<div class="cat-group-tabs" role="tablist" aria-label="' + esc(tt('catalog.categories', 'Категории')) + '">' + tabsHtml + '</div>' +
+      '<div id="cat-group-panel" class="cat-group-panel"></div>';
+
+    renderActiveGroup();
+  }
+
+  function renderActiveGroup() {
+    var panel = document.getElementById('cat-group-panel');
+    if (!panel) return;
+    var group = catalogGroups.find(function (g) { return g.id === activeGroupId; });
+    if (!group || !group.collections.length) {
+      panel.innerHTML = '<p class="cat-row-empty">' + esc(tt('catalog.loadError', 'Не удалось загрузить каталог.')) + '</p>';
+      return;
+    }
+
+    panel.innerHTML = '' +
+      '<div class="cat-chips" role="tablist" aria-label="' + esc(group.title) + '">' +
+        group.collections.map(function (s) {
           var m = categoryMeta(s);
           return '<button type="button" class="cat-chip" data-collection="' + esc(s.id) + '" aria-expanded="false">' +
             '<span class="cat-chip-icon" aria-hidden="true">' + m.icon + '</span>' +
@@ -290,8 +329,20 @@
       '<div id="cat-chip-panel" class="cat-chip-panel" hidden></div>';
   }
 
-  // Делегированный обработчик чипов подборок.
+  // Делегированный обработчик табов групп и чипов подборок.
   indexEl.addEventListener('click', function (e) {
+    var groupTab = e.target.closest && e.target.closest('.cat-group-tab');
+    if (groupTab) {
+      activeGroupId = groupTab.getAttribute('data-group');
+      indexEl.querySelectorAll('.cat-group-tab').forEach(function (t) {
+        var on = t === groupTab;
+        t.classList.toggle('cat-group-tab--active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      renderActiveGroup();
+      return;
+    }
+
     var chip = e.target.closest && e.target.closest('.cat-chip');
     if (!chip) return;
     var id = chip.getAttribute('data-collection');
@@ -458,6 +509,85 @@
     });
   }
 
+  /* ── Поиск по названию ─────────────────────────────────────────── */
+  function setSearching(active) {
+    section.classList.toggle('catalog-section--searching', active);
+  }
+
+  function renderMovieRequestCompact() {
+    if (window.MovieRequestBlock && window.MovieRequestBlock.updateCompactEl) {
+      window.MovieRequestBlock.updateCompactEl(movieRequestCompactEl);
+    }
+  }
+
+  function renderSearchResults(items) {
+    if (!searchResultsEl) return;
+    if (!items || !items.length) {
+      searchResultsEl.innerHTML = (window.MovieRequestBlock && window.MovieRequestBlock.html)
+        ? window.MovieRequestBlock.html({ showEmpty: true })
+        : '<p class="cat-row-empty">' + esc(tt('catalog.searchEmpty', 'Ничего не найдено.')) + '</p>';
+      return;
+    }
+    searchResultsEl.innerHTML = items.map(function (it) { return cardHtml(it); }).join('');
+    var cards = searchResultsEl.querySelectorAll('.cat-card');
+    cards.forEach(function (card, i) { card.__catItem = items[i]; });
+  }
+
+  function runSearch(query) {
+    if (!searchPanelEl || !searchResultsEl) return;
+    if (!query) {
+      setSearching(false);
+      searchPanelEl.hidden = true;
+      searchResultsEl.innerHTML = '';
+      return;
+    }
+    setSearching(true);
+    searchPanelEl.hidden = false;
+    searchResultsEl.innerHTML = '<p class="cat-search-loading">' + esc(tt('common.loading', 'Загрузка…')) + '</p>';
+
+    var seq = ++searchSeq;
+    var url = withLang('/api/catalog/search?q=' + encodeURIComponent(query) + '&filter=' + encodeURIComponent(searchFilter));
+    fetch(url, { headers: hdrs() })
+      .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
+      .then(function (out) {
+        if (seq !== searchSeq) return;
+        if (!out.ok) {
+          searchResultsEl.innerHTML = '<p class="cat-row-empty">' + esc(tt('catalog.searchError', 'Не удалось выполнить поиск.')) + '</p>';
+          return;
+        }
+        renderSearchResults(out.d && out.d.items);
+      })
+      .catch(function () {
+        if (seq !== searchSeq) return;
+        searchResultsEl.innerHTML = '<p class="cat-row-empty">' + esc(tt('card.serverDown', 'Сервер недоступен')) + '</p>';
+      });
+  }
+
+  function scheduleSearch() {
+    clearTimeout(searchTimer);
+    var q = searchInput ? searchInput.value.trim() : '';
+    searchTimer = setTimeout(function () { runSearch(q); }, 320);
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener('input', scheduleSearch);
+    searchInput.addEventListener('search', scheduleSearch);
+  }
+
+  if (searchFilterEl) {
+    searchFilterEl.addEventListener('click', function (e) {
+      var tab = e.target.closest && e.target.closest('.cat-search-tab');
+      if (!tab) return;
+      searchFilterEl.querySelectorAll('.cat-search-tab').forEach(function (t) {
+        t.classList.toggle('cat-search-tab--active', t === tab);
+      });
+      searchFilter = tab.getAttribute('data-filter') || 'all';
+      if (searchInput && searchInput.value.trim()) runSearch(searchInput.value.trim());
+    });
+  }
+
+  renderMovieRequestCompact();
+
   /* ── Инициализация ─────────────────────────────────────────────── */
   var indexRendered = false;
   var indexLoading = false;
@@ -487,11 +617,15 @@
     loadedCollections = {};
     indexRendered = false;
     indexLoading = false;
+    activeGroupId = null;
+    catalogGroups = [];
     var panel = document.getElementById('cat-chip-panel');
     if (panel) { panel.hidden = true; panel.innerHTML = ''; }
     if (topItemsEl) topItemsEl.innerHTML = '';
     init();
     kickVisible();
+    if (searchInput && searchInput.value.trim()) runSearch(searchInput.value.trim());
+    renderMovieRequestCompact();
   });
 
   // Кнопка «Повторить» в состоянии ошибки.
